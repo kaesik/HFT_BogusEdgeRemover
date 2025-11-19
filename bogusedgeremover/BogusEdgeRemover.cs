@@ -1,26 +1,25 @@
-﻿using System.ComponentModel.Composition;
-using Tekla.Structures.DrawingPresentationModel;
-using Tekla.Structures.DrawingPresentationPluginInterface;
-
-using TS = Tekla.Structures;
+﻿using TS = Tekla.Structures;
 using TSM = Tekla.Structures.Model;
 using TSD = Tekla.Structures.Drawing;
 using TSP = Tekla.Structures.Plugins;
-using TSG = Tekla.Structures.Geometry3d;
 
-namespace CustomPresentationPlugin
+namespace BogusEdgeRemover
 {
     using System;
     using System.Collections.Generic;
+    using System.ComponentModel.Composition;
+
     using Tekla.Common.Geometry;
+    using TS.DrawingPresentationModel;
+    using TS.DrawingPresentationPluginInterface;
+    using TS.Geometry3d;
     using TS.Solid;
-    using TSG;
 
     [Export(typeof(IDrawingPresentationPlugin))]
-    [ExportMetadata("ObjectType", new CustomPresentationObjectTypesEnum[]
+    [ExportMetadata("ObjectType", new[]
     {
         CustomPresentationObjectTypesEnum.Pours,
-        CustomPresentationObjectTypesEnum.Parts,
+        CustomPresentationObjectTypesEnum.Parts
     })]
     [ExportMetadata("BriefDescription", "Bogus Edge Remover")]
     [ExportMetadata("Description", "Presentation plugin that removes the edges of a part that are a result of a non-planar surface.")]
@@ -40,7 +39,6 @@ namespace CustomPresentationPlugin
 
         private double Scale { get; set; }
         private Matrix TransformationMatrix { get; set; }
-        private TSD.View.ViewTypes ViewType { get; set; }
 
         public Segment CreatePresentation(Segment presentation)
         {
@@ -51,25 +49,24 @@ namespace CustomPresentationPlugin
             if (drawingPart == null)
                 return presentation;
 
-            if (_model.SelectModelObject(drawingPart.ModelIdentifier) is not TSM.Part modelPart)
+            if (this._model.SelectModelObject(drawingPart.ModelIdentifier) is not TSM.Part modelPart)
                 return presentation;
 
             var view = drawingPart.GetView() as TSD.View;
             if (view == null)
                 return presentation;
 
-            ViewType = view.ViewType;
-            Scale = view.Attributes.Scale;
-            TransformationMatrix = MatrixFactory.ToCoordinateSystem(view.DisplayCoordinateSystem);
+            this.Scale = view.Attributes.Scale;
+            this.TransformationMatrix = MatrixFactory.ToCoordinateSystem(view.DisplayCoordinateSystem);
 
             Vector viewAxisX = view.ViewCoordinateSystem.AxisX;
             Vector viewAxisY = view.ViewCoordinateSystem.AxisY;
             Vector viewAxisZ = viewAxisX.Cross(viewAxisY);
 
-            var edgesToDelete = GetModelEdgesInDrawingToBeDeletedInDrawing(modelPart, viewAxisZ);
+            var edgesToDelete = this.GetModelEdgesInDrawingToBeDeletedInDrawing(modelPart, viewAxisZ);
             if (edgesToDelete.Count > 0)
             {
-                RemoveBogusLines(presentation, edgesToDelete);
+                this.RemoveBogusLines(presentation, edgesToDelete);
             }
 
             return presentation;
@@ -84,11 +81,10 @@ namespace CustomPresentationPlugin
 
             int removedHiddenLinesCount = 0;
 
-            for (int i = 0; i < presentation.Primitives.Count; i++)
-            {
-                if (presentation.Primitives[i] is PrimitiveGroup group)
+            foreach (var primitive in presentation.Primitives) {
+                if (primitive is PrimitiveGroup group)
                 {
-                    RemoveBogusLinesInPrimitiveGroup(presentation, modelEdgesToBeDeleted, group, ref removedHiddenLinesCount);
+                    this.RemoveBogusLinesInPrimitiveGroup(presentation, modelEdgesToBeDeleted, group, ref removedHiddenLinesCount);
                 }
             }
         }
@@ -110,14 +106,14 @@ namespace CustomPresentationPlugin
                 switch (primitiveBase)
                 {
                     case LinePrimitive linePrimitive:
-                        if (!ShouldDeleteLine(presentation, linePrimitive, modelEdgesToBeDeleted, fullLinePrimitiveGroup, ref removedHiddenLinesCount))
+                        if (!this.ShouldDeleteLine(presentation, linePrimitive, modelEdgesToBeDeleted, fullLinePrimitiveGroup, ref removedHiddenLinesCount))
                         {
                             newPrimitives.Add(linePrimitive);
                         }
                         break;
 
                     case PrimitiveGroup nestedGroup:
-                        RemoveBogusLinesInPrimitiveGroup(presentation, modelEdgesToBeDeleted, nestedGroup, ref removedHiddenLinesCount);
+                        this.RemoveBogusLinesInPrimitiveGroup(presentation, modelEdgesToBeDeleted, nestedGroup, ref removedHiddenLinesCount);
                         newPrimitives.Add(nestedGroup);
                         break;
 
@@ -144,7 +140,7 @@ namespace CustomPresentationPlugin
             if (!LinePrimitiveShouldBeDeleted(linePrimitive, fullLinePrimitiveGroup, modelEdgesToBeDeleted))
                 return false;
 
-            if (!LinePrimitiveIsNotExternal(linePrimitive, presentation))
+            if (!this.LinePrimitiveIsNotExternal(linePrimitive, presentation))
                 return false;
 
             removedHiddenLinesCount++;
@@ -173,7 +169,7 @@ namespace CustomPresentationPlugin
             {
                 if (primitive is PrimitiveGroup primitiveGroup)
                 {
-                    CheckLinePrimitiveIsNotExternalInPrimitiveGroup(
+                    this.CheckLinePrimitiveIsNotExternalInPrimitiveGroup(
                         verticalLine01,
                         horizontalLine01,
                         verticalLine05,
@@ -254,7 +250,7 @@ namespace CustomPresentationPlugin
                         break;
 
                     case PrimitiveGroup nestedGroup:
-                        CheckLinePrimitiveIsNotExternalInPrimitiveGroup(
+                        this.CheckLinePrimitiveIsNotExternalInPrimitiveGroup(
                             verticalLine01,
                             horizontalLine01,
                             verticalLine05,
@@ -301,7 +297,7 @@ namespace CustomPresentationPlugin
                 currentLineEndPoint   = new Point(currentArcPrimitive.EndPoint.X,   currentArcPrimitive.EndPoint.Y);
             }
 
-            if (currentLineStartPoint == null || currentLineEndPoint == null)
+            if (currentLineStartPoint == null)
                 return;
 
             Line currentLine = new(currentLineStartPoint, currentLineEndPoint);
@@ -465,7 +461,7 @@ namespace CustomPresentationPlugin
                 if (!LinePrimitiveOverlapsWithEdgeToBeDeleted(linePrimitive, modelEdgeToBeDeleted))
                     continue;
 
-                if (modelEdgeToBeDeleted.VisibleLine || fullLinePrimitiveGroup == modelEdgeToBeDeleted.VisibleLine)
+                if (modelEdgeToBeDeleted.VisibleLine || fullLinePrimitiveGroup == false)
                     return true;
             }
 
@@ -521,29 +517,29 @@ namespace CustomPresentationPlugin
 
             while (faceEnum.MoveNext())
             {
-                if (faceEnum.Current is not Face currentFace)
+                if (faceEnum.Current is not { } currentFace)
                     continue;
 
-                if (!FaceIsNotHorizontalNorVertical(currentFace))
+                if (!this.FaceIsNotHorizontalNorVertical(currentFace))
                     continue;
 
-                var facesWithSimilarNormal = GetFacesWithSimilarNormal(currentFace, solid.GetFaceEnumerator());
+                var facesWithSimilarNormal = this.GetFacesWithSimilarNormal(currentFace, solid.GetFaceEnumerator());
 
                 foreach (Face faceWithSimilarNormal in facesWithSimilarNormal)
                 {
-                    LineSegment commonEdge = GetCommonEdge(currentFace, faceWithSimilarNormal);
+                    LineSegment commonEdge = this.GetCommonEdge(currentFace, faceWithSimilarNormal);
                     if (commonEdge == null)
                         continue;
 
-                    Point transformedStartPoint = TransformationMatrix.Transform(commonEdge.StartPoint);
+                    Point transformedStartPoint = this.TransformationMatrix.Transform(commonEdge.StartPoint);
                     Vector2 startPointInDrawing = new(
-                        transformedStartPoint.X / Scale,
-                        transformedStartPoint.Y / Scale);
+                        transformedStartPoint.X / this.Scale,
+                        transformedStartPoint.Y / this.Scale);
 
-                    Point transformedEndPoint = TransformationMatrix.Transform(commonEdge.EndPoint);
+                    Point transformedEndPoint = this.TransformationMatrix.Transform(commonEdge.EndPoint);
                     Vector2 endPointInDrawing = new(
-                        transformedEndPoint.X / Scale,
-                        transformedEndPoint.Y / Scale);
+                        transformedEndPoint.X / this.Scale,
+                        transformedEndPoint.Y / this.Scale);
 
                     var commonEdgeInDrawing = new LinePrimitive(startPointInDrawing, endPointInDrawing);
 
@@ -566,7 +562,7 @@ namespace CustomPresentationPlugin
 
         private bool FaceIsNotHorizontalNorVertical(Face currentFace)
         {
-            double faceAngle = currentFace.Normal.GetAngleBetween(_globalAxisZ);
+            double faceAngle = currentFace.Normal.GetAngleBetween(this._globalAxisZ);
 
             if (faceAngle < AngleEpsilon)
                 return false;
@@ -626,7 +622,7 @@ namespace CustomPresentationPlugin
 
             while (loopEnum.MoveNext())
             {
-                if (loopEnum.Current is not Loop loop)
+                if (loopEnum.Current is not { } loop)
                     continue;
 
                 VertexEnumerator vertexEnum = loop.GetVertexEnumerator();
@@ -649,14 +645,14 @@ namespace CustomPresentationPlugin
 
             while (faceEnumerator.MoveNext())
             {
-                if (faceEnumerator.Current is not Face secondaryFace)
+                if (faceEnumerator.Current is not { } secondaryFace)
                     continue;
 
                 if (secondaryFace.Equals(currentFace))
                     continue;
 
                 if (currentFace.Normal.GetAngleBetween(secondaryFace.Normal) < BigAngleAllowance &&
-                    FaceIsNotHorizontalNorVertical(secondaryFace))
+                    this.FaceIsNotHorizontalNorVertical(secondaryFace))
                 {
                     facesWithSimilarNormal.Add(secondaryFace);
                 }
@@ -683,8 +679,8 @@ namespace CustomPresentationPlugin
 
             public ModelEdgePair(LinePrimitive modelEdgeInDrawing, bool visibleLine)
             {
-                ModelEdgeInDrawing = modelEdgeInDrawing;
-                VisibleLine = visibleLine;
+                this.ModelEdgeInDrawing = modelEdgeInDrawing;
+                this.VisibleLine = visibleLine;
             }
         }
 
@@ -696,9 +692,9 @@ namespace CustomPresentationPlugin
 
             public LineIntersections(bool line01, bool line05, bool line09)
             {
-                Line01 = line01;
-                Line05 = line05;
-                Line09 = line09;
+                this.Line01 = line01;
+                this.Line05 = line05;
+                this.Line09 = line09;
             }
         }
 
