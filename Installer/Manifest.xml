@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- TEP Version 2.0 works with TS 2016i onwards and supports wildcards -->
+<TEP Version="2.0">
+   <!--Todo: Change the Id, UpgradeCode, Name, Manufacturer and Description to match the extension you want to create TSEP installer -->
+   <Product Id="BogusEdgeRemover" UpgradeCode="c789a113-cf99-41a9-8617-f37fb9396dde" Version="2.1" Language="1033"
+        Name="BogusEdgeRemover" Manufacturer="Trimble Solutions Germany GmbH"  Description= "Presentation plugin that removes the edges of a part that are a result of a non-planar surface."
+        IconPath="%InstallerFolder%\Bitmaps\Icon.png">
+      <TeklaVersions>
+          <TeklaVersion Name="2017.0"/>
+          <MinTeklaVersion Name="2017.0"/>
+          <MaxTeklaVersion Name="2099.1"/>
+      </TeklaVersions>
+   </Product>
+   
+ <SourcePathVariables>
+  <SourcePathVariable Id="TepOutputFolder" Value="%TEPDEFINITIONFILEFOLDER%\output" Comment="This provides the location where the package builder is to save the package."/>
+  <SourcePathVariable Id="InstallerFolder" Value="%TEPDEFINITIONFILEFOLDER%"/>
+ </SourcePathVariables>
+  
+ <TargetPathVariables>
+ <!--Target directories for extension files, update ExtensionName -->
+    <PathVariable Id="ExtensionsDir" Value="%commonEnvFolder%\extensions\"/>
+    <PathVariable Id="CustomPresentationDir" Value="%ExtensionsDir%\custom\presentation\"/>
+<!--Environments -->
+<!--Common -->
+    <PathVariable Id="CommonDir" Value="%commonEnvFolder%\"/>
+<!--Germany-->
+    <PathVariable Id="GermanDir" Value="%ENVDIR%\germany\"/>
+
+ </TargetPathVariables>
+  
+ <Component Id="TheExtensionComponent" Guid="771484ad-3531-49c2-835f-4f6b7d788180">
+  <!--Todo: Update correct files' name and paths in the extension's installer/TSEP folder -->
+  <File Id="AttributeFile" Source="%InstallerFolder%\BuildDrop\BogusEdgeRemover.dll" Target="%CustomPresentationDir%" />
+  
+  <!--Environments-->
+  <!--File Id="CommonFiles" Source="%InstallerFolder%\Environments\common\*.*" Target="%CommonDir%" Recursive = "yes" /-->
+  <!--<File Id="GermanFiles" Source="%InstallerFolder%\Environments\germany\*.*" Target="%GermanDir%" Recursive = "yes" /-->
+  </Component>
+  
+ <Feature Id="TheExtensionFeature" Title="ExtensionFeature">
+  <ComponentRef ReferenceId="TheExtensionComponent" />
+ </Feature>
+ </TEP>

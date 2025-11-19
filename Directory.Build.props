@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" >
+  <PropertyGroup>
+    <!-- Main Versions Numbers For Tekla Structures -->
+    <MajorVersionNumber                    Condition="'$(MajorVersionNumber)'==''">2099</MajorVersionNumber>
+    <MinorVersionNumber                    Condition="'$(MinorVersionNumber)'==''">0</MinorVersionNumber>
+    <BuildNumber                           Condition="'$(BuildNumber)'==''">0</BuildNumber>
+    <DirBuildPropsImported>true</DirBuildPropsImported>
+
+    <Version>$(MajorVersionNumber).$(MinorVersionNumber).$(BuildNumber)</Version>
+    <AssemblyVersion>$(MajorVersionNumber).$(MinorVersionNumber).$(BuildNumber).0</AssemblyVersion>
+    <FileVersion>$(MajorVersionNumber).$(MinorVersionNumber).$(BuildNumber).0</FileVersion>
+    <AssemblyTitle>Tekla Structures India Common Library</AssemblyTitle>
+    <Company>Trimble Solutions India Pvt.Ltd.</Company>
+    <Product>Tekla Structures</Product>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <BINDir>$(MSBuildThisFileDirectory)BuildDrop</BINDir>
+    <IntermediateOutputPath>$(MSBuildThisFileDirectory)OBJDir\$(MSBuildProjectName)</IntermediateOutputPath>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <SignAssembly>true</SignAssembly>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <LangVersion>9.0</LangVersion>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)\build\AssemblyKey.snk</AssemblyOriginatorKeyFile>
+    <PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+  </PropertyGroup>
+
+
+  <PropertyGroup>
+    <!--AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)MSBuild\AssemblyKey.snk</AssemblyOriginatorKeyFile-->
+    <Authors>Trimble Solutions India Pvt.Ltd.</Authors>
+    <PackageYear>$([System.DateTime]::Now.ToString("yyyy"))</PackageYear>
+    <PackageProjectUrl>https://www.tekla.com/ </PackageProjectUrl>
+    <Copyright>Copyright © 1992-$(PackageYear) Trimble Solutions India Pvt.Ltd. and its licensors. All rights reserved.</Copyright>
+    <PackageLicenseFile>eula.txt</PackageLicenseFile>
+    <PackageIcon>logo.png</PackageIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)build\logo.png" Pack="true" PackagePath=""/>
+    <None Include="$(MSBuildThisFileDirectory)build\eula.txt" Pack="true" PackagePath=""/>
+  </ItemGroup>
+  
+</Project>
