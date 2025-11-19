@@ -1,6 +1,5 @@
 ﻿using System.ComponentModel.Composition;
 using Tekla.Structures.DrawingPresentationModel;
-
 using Tekla.Structures.DrawingPresentationPluginInterface;
 
 using TS = Tekla.Structures;
@@ -13,13 +12,13 @@ namespace CustomPresentationPlugin
 {
     using System;
     using System.Collections.Generic;
-    using System.Threading;
     using Tekla.Common.Geometry;
     using TS.Solid;
     using TSG;
 
     [Export(typeof(IDrawingPresentationPlugin))]
-    [ExportMetadata("ObjectType", new CustomPresentationObjectTypesEnum[] {
+    [ExportMetadata("ObjectType", new CustomPresentationObjectTypesEnum[]
+    {
         CustomPresentationObjectTypesEnum.Pours,
         CustomPresentationObjectTypesEnum.Parts,
     })]
@@ -28,357 +27,364 @@ namespace CustomPresentationPlugin
     [ExportMetadata("GUID", "00CE0BCD-429B-48AC-A235-DC14311204D4")]
     public class BogusEdgeRemover : IDrawingPresentationPlugin
     {
-        /// <summary> The epsilon used for model. </summary>
-        private const double ModelEpsilon = 1.0;
-
-        /// <summary> The epsilon used for drawing. </summary>
-        private const double DrawingEpsilon = 0.0001;
-
-        /// <summary> 180 degrees expressed in radians. </summary>
-        private const double Degrees180 = Math.PI;
-
-        /// <summary> 90 degrees expressed in radians. </summary>
-        private const double Degrees90 = Math.PI / 2;
-
-        /// <summary> The allowance used for angles. </summary>
-        private const double BigAngleAllowance = Math.PI / 2.5;
-
-        /// <summary> The allowance used for angles. </summary>
+        private const double ModelEpsilon        = 1.0;
+        private const double DrawingEpsilon      = 0.0001;
+        private const double Degrees180          = Math.PI;
+        private const double Degrees90           = Math.PI / 2;
+        private const double BigAngleAllowance   = Math.PI / 2.5;
         private const double SmallAngleAllowance = Math.PI / 32;
+        private const double AngleEpsilon        = 0.001;
 
-        /// <summary> The epsilon used for angles. </summary>
-        private const double AngleEpsilon = 0.001;
-
-        /// <summary> The Z axis of the global coordinate system. </summary>
         private readonly Vector _globalAxisZ = new(0.0, 0.0, 1.0);
-
-        private const int RemovedHiddenLinesCountLimit = 20;
-
         private readonly TSM.Model _model = new();
 
         private double Scale { get; set; }
-
         private Matrix TransformationMatrix { get; set; }
-
         private TSD.View.ViewTypes ViewType { get; set; }
 
         public Segment CreatePresentation(Segment presentation)
         {
+            if (presentation == null)
+                return null;
 
-            if (presentation != null)
+            var drawingPart = GetDrawingPart(presentation.Id);
+            if (drawingPart == null)
+                return presentation;
+
+            if (_model.SelectModelObject(drawingPart.ModelIdentifier) is not TSM.Part modelPart)
+                return presentation;
+
+            var view = drawingPart.GetView() as TSD.View;
+            if (view == null)
+                return presentation;
+
+            ViewType = view.ViewType;
+            Scale = view.Attributes.Scale;
+            TransformationMatrix = MatrixFactory.ToCoordinateSystem(view.DisplayCoordinateSystem);
+
+            Vector viewAxisX = view.ViewCoordinateSystem.AxisX;
+            Vector viewAxisY = view.ViewCoordinateSystem.AxisY;
+            Vector viewAxisZ = viewAxisX.Cross(viewAxisY);
+
+            var edgesToDelete = GetModelEdgesInDrawingToBeDeletedInDrawing(modelPart, viewAxisZ);
+            if (edgesToDelete.Count > 0)
             {
-                var drawingPart = GetDrawingPart(presentation.Id);
-
-                if (this._model.SelectModelObject(drawingPart.ModelIdentifier) is TSM.Part selectedModelPart)
-                {
-                    this.ViewType = ((TSD.View)drawingPart.GetView()).ViewType;
-                    this.Scale = ((TSD.View)drawingPart.GetView()).Attributes.Scale;
-                    this.TransformationMatrix = MatrixFactory.ToCoordinateSystem(((TSD.View)drawingPart.GetView()).DisplayCoordinateSystem);
-
-                    Vector viewAxisX = ((TSD.View)drawingPart.GetView()).ViewCoordinateSystem.AxisX;
-                    Vector viewAxisY = ((TSD.View)drawingPart.GetView()).ViewCoordinateSystem.AxisY;
-                    Vector viewAxisZ = viewAxisX.Cross(viewAxisY);
-
-
-                    List<ModelEdgePair> modelEdgesToBeDeleted = this.GetModelEdgesInDrawingToBeDeletedInDrawing(selectedModelPart, viewAxisZ);
-
-                    this.RemoveBogusLines(presentation, modelEdgesToBeDeleted);
-
-                    ////this.DrawModelEdgesToBeDeleted(presentation, modelEdgesToBeDeleted);
-                }
+                RemoveBogusLines(presentation, edgesToDelete);
             }
 
             return presentation;
         }
 
-        private void DrawModelEdgesToBeDeleted(Segment presentation, List<ModelEdgePair> modelEdgesToBeDeleted)
-        {
-            PrimitiveGroup primitiveGroup0 = presentation.Primitives[0] as PrimitiveGroup;
-            PrimitiveGroup addedPrimitiveGroup = new PrimitiveGroup(7873, new Pen(2, 1, 3), primitiveGroup0.Brush, primitiveGroup0.GroupType);
-
-            foreach (ModelEdgePair singlePrimitiveBaseCopy in modelEdgesToBeDeleted)
-            {
-                addedPrimitiveGroup.Primitives.Add(singlePrimitiveBaseCopy.ModelEdgeInDrawing);
-            }
-
-            presentation.Primitives.Add(addedPrimitiveGroup);
-        }
+        #region Główna logika usuwania linii
 
         private void RemoveBogusLines(Segment presentation, List<ModelEdgePair> modelEdgesToBeDeleted)
         {
+            if (presentation?.Primitives == null || presentation.Primitives.Count == 0)
+                return;
+
             int removedHiddenLinesCount = 0;
 
-            foreach (var primitive in presentation.Primitives) {
-                PrimitiveGroup primitiveGroup = primitive as PrimitiveGroup;
-
-                this.RemoveBogusLinesInPrimitiveGroup(presentation, modelEdgesToBeDeleted, ref primitiveGroup, ref removedHiddenLinesCount);
+            for (int i = 0; i < presentation.Primitives.Count; i++)
+            {
+                if (presentation.Primitives[i] is PrimitiveGroup group)
+                {
+                    RemoveBogusLinesInPrimitiveGroup(presentation, modelEdgesToBeDeleted, group, ref removedHiddenLinesCount);
+                }
             }
         }
 
-        private void RemoveBogusLinesInPrimitiveGroup(Segment presentation,
+        private void RemoveBogusLinesInPrimitiveGroup(
+            Segment presentation,
             List<ModelEdgePair> modelEdgesToBeDeleted,
-            ref PrimitiveGroup primitiveGroup,
+            PrimitiveGroup primitiveGroup,
             ref int removedHiddenLinesCount)
         {
-            List<PrimitiveBase> primitiveBaseCopy = new List<PrimitiveBase>();
+            if (primitiveGroup?.Primitives == null || primitiveGroup.Primitives.Count == 0)
+                return;
+
+            var newPrimitives = new List<PrimitiveBase>(primitiveGroup.Primitives.Count);
             bool fullLinePrimitiveGroup = primitiveGroup.Pen.LineType == 1;
 
             foreach (PrimitiveBase primitiveBase in primitiveGroup.Primitives)
             {
-                switch (primitiveBase) {
+                switch (primitiveBase)
+                {
                     case LinePrimitive linePrimitive:
-                        this.LinePrimitiveShouldBeRemovedOrCopied(
-                            presentation,
-                            linePrimitive,
-                            primitiveBase,
-                            modelEdgesToBeDeleted,
-                            primitiveBaseCopy,
-                            fullLinePrimitiveGroup,
-                            ref removedHiddenLinesCount);
+                        if (!ShouldDeleteLine(presentation, linePrimitive, modelEdgesToBeDeleted, fullLinePrimitiveGroup, ref removedHiddenLinesCount))
+                        {
+                            newPrimitives.Add(linePrimitive);
+                        }
                         break;
-                    case PrimitiveGroup groupPrimitive:
-                        this.RemoveBogusLinesInPrimitiveGroup(presentation, modelEdgesToBeDeleted, ref groupPrimitive, ref removedHiddenLinesCount);
-                        primitiveBaseCopy.Add(groupPrimitive);
+
+                    case PrimitiveGroup nestedGroup:
+                        RemoveBogusLinesInPrimitiveGroup(presentation, modelEdgesToBeDeleted, nestedGroup, ref removedHiddenLinesCount);
+                        newPrimitives.Add(nestedGroup);
                         break;
+
                     default:
-                        primitiveBaseCopy.Add(primitiveBase);
+                        newPrimitives.Add(primitiveBase);
                         break;
                 }
             }
 
             primitiveGroup.Primitives.Clear();
-
-            foreach (PrimitiveBase singlePrimitiveBaseCopy in primitiveBaseCopy)
+            foreach (var primitive in newPrimitives)
             {
-                primitiveGroup.Primitives.Add(singlePrimitiveBaseCopy);
+                primitiveGroup.Primitives.Add(primitive);
             }
         }
 
-        private void LinePrimitiveShouldBeRemovedOrCopied(
+        private bool ShouldDeleteLine(
             Segment presentation,
             LinePrimitive linePrimitive,
-            PrimitiveBase primitiveBase,
-            List<ModelEdgePair> modelEdgesToBeDeleted, 
-            List<PrimitiveBase> primitiveBaseCopy, 
+            List<ModelEdgePair> modelEdgesToBeDeleted,
             bool fullLinePrimitiveGroup,
             ref int removedHiddenLinesCount)
         {
-            if (LinePrimitiveShouldBeDeleted(linePrimitive, fullLinePrimitiveGroup, modelEdgesToBeDeleted)
-               && this.LinePrimitiveIsNotExternal(linePrimitive, presentation))
-            {
-                removedHiddenLinesCount++;
-            }
-            else
-            {
-                primitiveBaseCopy.Add(primitiveBase);
-            }
+            if (!LinePrimitiveShouldBeDeleted(linePrimitive, fullLinePrimitiveGroup, modelEdgesToBeDeleted))
+                return false;
+
+            if (!LinePrimitiveIsNotExternal(linePrimitive, presentation))
+                return false;
+
+            removedHiddenLinesCount++;
+            return true;
         }
+
+        #endregion
+
+        #region Detekcja linii zewnętrznych / wewnętrznych
 
         private bool LinePrimitiveIsNotExternal(LinePrimitive linePrimitive, Segment presentation)
         {
-            bool linePrimitiveIsNotExternal = true;
+            if (presentation?.Primitives == null)
+                return true;
 
-            LineIntersections top = new LineIntersections(false, false, false);
-            LineIntersections bottom = new LineIntersections(false, false, false);
-            LineIntersections right = new LineIntersections(false, false, false);
-            LineIntersections left = new LineIntersections(false, false, false);
+            LineIntersections top = new(false, false, false);
+            LineIntersections bottom = new(false, false, false);
+            LineIntersections right = new(false, false, false);
+            LineIntersections left = new(false, false, false);
 
             GetVerticalAndHorizontalCenterLines(linePrimitive, 0.25, out var verticalLine01, out var horizontalLine01, out _);
             GetVerticalAndHorizontalCenterLines(linePrimitive, 0.5, out var verticalLine05, out var horizontalLine05, out var centerPoint);
             GetVerticalAndHorizontalCenterLines(linePrimitive, 0.75, out var verticalLine09, out var horizontalLine09, out _);
 
-            foreach (var primitive in presentation.Primitives) {
-                PrimitiveGroup primitiveGroup = primitive as PrimitiveGroup;
-
-                this.CheckLinePrimitiveIsNotExternalInPrimitiveGroup(
-                    verticalLine01, 
-                    horizontalLine01, 
-                    verticalLine05, 
-                    horizontalLine05, 
-                    verticalLine09, 
-                    horizontalLine09, 
-                    centerPoint, 
-                    primitiveGroup,
-                    ref top, 
-                    ref bottom, 
-                    ref right, 
-                    ref left);
+            foreach (var primitive in presentation.Primitives)
+            {
+                if (primitive is PrimitiveGroup primitiveGroup)
+                {
+                    CheckLinePrimitiveIsNotExternalInPrimitiveGroup(
+                        verticalLine01,
+                        horizontalLine01,
+                        verticalLine05,
+                        horizontalLine05,
+                        verticalLine09,
+                        horizontalLine09,
+                        centerPoint,
+                        primitiveGroup,
+                        ref top,
+                        ref bottom,
+                        ref right,
+                        ref left);
+                }
             }
 
-            linePrimitiveIsNotExternal = top is { Line01: true, Line05: true, Line09: true }
-                                         && bottom is { Line01: true, Line05: true, Line09: true }
-                                         && right is { Line01: true, Line05: true, Line09: true }
-                                         && left is { Line01: true, Line05: true, Line09: true };
+            bool linePrimitiveIsNotExternal =
+                   top    is { Line01: true, Line05: true, Line09: true }
+                && bottom is { Line01: true, Line05: true, Line09: true }
+                && right  is { Line01: true, Line05: true, Line09: true }
+                && left   is { Line01: true, Line05: true, Line09: true };
 
             return linePrimitiveIsNotExternal;
         }
 
         private void CheckLinePrimitiveIsNotExternalInPrimitiveGroup(
-            List<Line> verticalLine01, 
-            List<Line> horizontalLine01, 
-            List<Line> verticalLine05, 
-            List<Line> horizontalLine05, 
-            List<Line> verticalLine09, 
-            List<Line> horizontalLine09, 
-            Point centerPoint, 
+            List<Line> verticalLine01,
+            List<Line> horizontalLine01,
+            List<Line> verticalLine05,
+            List<Line> horizontalLine05,
+            List<Line> verticalLine09,
+            List<Line> horizontalLine09,
+            Point centerPoint,
             PrimitiveGroup primitiveGroup,
-            ref LineIntersections top, 
-            ref LineIntersections bottom, 
-            ref LineIntersections right, 
+            ref LineIntersections top,
+            ref LineIntersections bottom,
+            ref LineIntersections right,
             ref LineIntersections left)
         {
+            if (primitiveGroup?.Primitives == null)
+                return;
+
             foreach (PrimitiveBase primitiveBase in primitiveGroup.Primitives)
             {
-                LinePrimitive currentLinePrimitive = primitiveBase as LinePrimitive;
-                ArcPrimitive currentArcPrimitive = primitiveBase as ArcPrimitive;
+                switch (primitiveBase)
+                {
+                    case LinePrimitive currentLinePrimitive:
+                        LineOrArcPrimitiveIsNotExternal(
+                            verticalLine01,
+                            horizontalLine01,
+                            verticalLine05,
+                            horizontalLine05,
+                            verticalLine09,
+                            horizontalLine09,
+                            centerPoint,
+                            currentLinePrimitive,
+                            null,
+                            ref top,
+                            ref bottom,
+                            ref right,
+                            ref left);
+                        break;
 
-                if (currentLinePrimitive != null || currentArcPrimitive != null)
-                {
-                    LineOrArcPrimitiveIsNotExternal(
-                        verticalLine01,
-                        horizontalLine01,
-                        verticalLine05,
-                        horizontalLine05,
-                        verticalLine09,
-                        horizontalLine09,
-                        centerPoint,
-                        currentLinePrimitive,
-                        currentArcPrimitive,
-                        ref top,
-                        ref bottom,
-                        ref right,
-                        ref left);
-                }
-                else if (primitiveBase is PrimitiveGroup groupPrimitive)
-                {
-                    this.CheckLinePrimitiveIsNotExternalInPrimitiveGroup(
-                        verticalLine01,
-                        horizontalLine01,
-                        verticalLine05,
-                        horizontalLine05,
-                        verticalLine09,
-                        horizontalLine09,
-                        centerPoint,
-                        groupPrimitive,
-                        ref top,
-                        ref bottom,
-                        ref right,
-                        ref left);
+                    case ArcPrimitive currentArcPrimitive:
+                        LineOrArcPrimitiveIsNotExternal(
+                            verticalLine01,
+                            horizontalLine01,
+                            verticalLine05,
+                            horizontalLine05,
+                            verticalLine09,
+                            horizontalLine09,
+                            centerPoint,
+                            null,
+                            currentArcPrimitive,
+                            ref top,
+                            ref bottom,
+                            ref right,
+                            ref left);
+                        break;
+
+                    case PrimitiveGroup nestedGroup:
+                        CheckLinePrimitiveIsNotExternalInPrimitiveGroup(
+                            verticalLine01,
+                            horizontalLine01,
+                            verticalLine05,
+                            horizontalLine05,
+                            verticalLine09,
+                            horizontalLine09,
+                            centerPoint,
+                            nestedGroup,
+                            ref top,
+                            ref bottom,
+                            ref right,
+                            ref left);
+                        break;
                 }
             }
         }
 
         private static void LineOrArcPrimitiveIsNotExternal(
-            List<Line> verticalLine01, 
-            List<Line> horizontalLine01, 
-            List<Line> verticalLine05, 
-            List<Line> horizontalLine05, 
-            List<Line> verticalLine09, 
-            List<Line> horizontalLine09, 
-            Point centerPoint, 
-            LinePrimitive currentLinePrimitive, 
+            List<Line> verticalLine01,
+            List<Line> horizontalLine01,
+            List<Line> verticalLine05,
+            List<Line> horizontalLine05,
+            List<Line> verticalLine09,
+            List<Line> horizontalLine09,
+            Point centerPoint,
+            LinePrimitive currentLinePrimitive,
             ArcPrimitive currentArcPrimitive,
-            ref LineIntersections top, 
-            ref LineIntersections bottom, 
-            ref LineIntersections right, 
+            ref LineIntersections top,
+            ref LineIntersections bottom,
+            ref LineIntersections right,
             ref LineIntersections left)
         {
-            Point currentLineStartPoint = null, currentLineEndPoint = null;
+            Point currentLineStartPoint = null;
+            Point currentLineEndPoint = null;
+
             if (currentLinePrimitive != null)
             {
                 currentLineStartPoint = new Point(currentLinePrimitive.StartPoint.X, currentLinePrimitive.StartPoint.Y);
-                currentLineEndPoint = new Point(currentLinePrimitive.EndPoint.X, currentLinePrimitive.EndPoint.Y);
+                currentLineEndPoint   = new Point(currentLinePrimitive.EndPoint.X,   currentLinePrimitive.EndPoint.Y);
             }
             else if (currentArcPrimitive != null)
             {
                 currentLineStartPoint = new Point(currentArcPrimitive.StartPoint.X, currentArcPrimitive.StartPoint.Y);
-                currentLineEndPoint = new Point(currentArcPrimitive.EndPoint.X, currentArcPrimitive.EndPoint.Y);
+                currentLineEndPoint   = new Point(currentArcPrimitive.EndPoint.X,   currentArcPrimitive.EndPoint.Y);
             }
 
-            if (currentLineStartPoint != null)
-            {
-                Line currentLine = new Line(currentLineStartPoint, currentLineEndPoint);
+            if (currentLineStartPoint == null || currentLineEndPoint == null)
+                return;
 
-                CheckWhereLinesIntersect(
-                    verticalLine01,
-                    true,
-                    centerPoint,
-                    currentLineStartPoint,
-                    currentLineEndPoint,
-                    currentLine,
-                    ref top.Line01,
-                    ref bottom.Line01,
-                    ref right.Line01,
-                    ref left.Line01);
+            Line currentLine = new(currentLineStartPoint, currentLineEndPoint);
 
-                CheckWhereLinesIntersect(
-                    horizontalLine01,
-                    false,
-                    centerPoint,
-                    currentLineStartPoint,
-                    currentLineEndPoint,
-                    currentLine,
-                    ref top.Line01,
-                    ref bottom.Line01,
-                    ref right.Line01,
-                    ref left.Line01);
+            CheckWhereLinesIntersect(
+                verticalLine01,
+                true,
+                centerPoint,
+                currentLineStartPoint,
+                currentLineEndPoint,
+                currentLine,
+                ref top.Line01,
+                ref bottom.Line01,
+                ref right.Line01,
+                ref left.Line01);
 
-                CheckWhereLinesIntersect(
-                    verticalLine05,
-                    true,
-                    centerPoint,
-                    currentLineStartPoint,
-                    currentLineEndPoint,
-                    currentLine,
-                    ref top.Line05,
-                    ref bottom.Line05,
-                    ref right.Line05,
-                    ref left.Line05);
+            CheckWhereLinesIntersect(
+                horizontalLine01,
+                false,
+                centerPoint,
+                currentLineStartPoint,
+                currentLineEndPoint,
+                currentLine,
+                ref top.Line01,
+                ref bottom.Line01,
+                ref right.Line01,
+                ref left.Line01);
 
-                CheckWhereLinesIntersect(
-                    horizontalLine05,
-                    false,
-                    centerPoint,
-                    currentLineStartPoint,
-                    currentLineEndPoint,
-                    currentLine,
-                    ref top.Line05,
-                    ref bottom.Line05,
-                    ref right.Line05,
-                    ref left.Line05);
+            CheckWhereLinesIntersect(
+                verticalLine05,
+                true,
+                centerPoint,
+                currentLineStartPoint,
+                currentLineEndPoint,
+                currentLine,
+                ref top.Line05,
+                ref bottom.Line05,
+                ref right.Line05,
+                ref left.Line05);
 
-                CheckWhereLinesIntersect(
-                    verticalLine09,
-                    true,
-                    centerPoint,
-                    currentLineStartPoint,
-                    currentLineEndPoint,
-                    currentLine,
-                    ref top.Line09,
-                    ref bottom.Line09,
-                    ref right.Line09,
-                    ref left.Line09);
+            CheckWhereLinesIntersect(
+                horizontalLine05,
+                false,
+                centerPoint,
+                currentLineStartPoint,
+                currentLineEndPoint,
+                currentLine,
+                ref top.Line05,
+                ref bottom.Line05,
+                ref right.Line05,
+                ref left.Line05);
 
-                CheckWhereLinesIntersect(
-                    horizontalLine09,
-                    false,
-                    centerPoint,
-                    currentLineStartPoint,
-                    currentLineEndPoint,
-                    currentLine,
-                    ref top.Line09,
-                    ref bottom.Line09,
-                    ref right.Line09,
-                    ref left.Line09);
-            }
+            CheckWhereLinesIntersect(
+                verticalLine09,
+                true,
+                centerPoint,
+                currentLineStartPoint,
+                currentLineEndPoint,
+                currentLine,
+                ref top.Line09,
+                ref bottom.Line09,
+                ref right.Line09,
+                ref left.Line09);
+
+            CheckWhereLinesIntersect(
+                horizontalLine09,
+                false,
+                centerPoint,
+                currentLineStartPoint,
+                currentLineEndPoint,
+                currentLine,
+                ref top.Line09,
+                ref bottom.Line09,
+                ref right.Line09,
+                ref left.Line09);
         }
 
         private static void CheckWhereLinesIntersect(
-            List<Line> lineCollection, 
+            List<Line> lineCollection,
             bool vertical,
-            Point centerPoint, 
-            Point currentLineStartPoint, 
-            Point currentLineEndPoint, 
+            Point centerPoint,
+            Point currentLineStartPoint,
+            Point currentLineEndPoint,
             Line currentLine,
             ref bool top,
             ref bool bottom,
@@ -389,49 +395,53 @@ namespace CustomPresentationPlugin
             {
                 LineSegment intersection = Intersection.LineToLine(currentLine, line);
 
-                if (intersection != null
-                    && intersection.Length() < DrawingEpsilon
-                    && Distance.PointToPoint(currentLineStartPoint, intersection.Point1) > DrawingEpsilon
-                    && Distance.PointToPoint(currentLineEndPoint, intersection.Point1) > DrawingEpsilon
-                    && new Vector(currentLineStartPoint - intersection.Point1).GetAngleBetween(new Vector(currentLineEndPoint - intersection.Point1)) > Degrees90)
+                if (intersection == null)
+                    continue;
+
+                if (intersection.Length() >= DrawingEpsilon)
+                    continue;
+
+                if (Distance.PointToPoint(currentLineStartPoint, intersection.Point1) <= DrawingEpsilon)
+                    continue;
+
+                if (Distance.PointToPoint(currentLineEndPoint, intersection.Point1) <= DrawingEpsilon)
+                    continue;
+
+                if (new Vector(currentLineStartPoint - intersection.Point1)
+                        .GetAngleBetween(new Vector(currentLineEndPoint - intersection.Point1)) <= Degrees90)
+                    continue;
+
+                if (vertical)
                 {
-                    if (vertical)
-                    {
-                        if (intersection.Point1.Y > centerPoint.Y + DrawingEpsilon)
-                        {
-                            top = true;
-                        }
-                        else if (intersection.Point1.Y < centerPoint.Y - DrawingEpsilon)
-                        {
-                            bottom = true;
-                        }
-                    }
-                    else
-                    {
-                        if (intersection.Point1.X > centerPoint.X + DrawingEpsilon)
-                        {
-                            right = true;
-                        }
-                        else if (intersection.Point1.X < centerPoint.X - DrawingEpsilon)
-                        {
-                            left = true;
-                        }
-                    }
+                    if (intersection.Point1.Y > centerPoint.Y + DrawingEpsilon)
+                        top = true;
+                    else if (intersection.Point1.Y < centerPoint.Y - DrawingEpsilon)
+                        bottom = true;
+                }
+                else
+                {
+                    if (intersection.Point1.X > centerPoint.X + DrawingEpsilon)
+                        right = true;
+                    else if (intersection.Point1.X < centerPoint.X - DrawingEpsilon)
+                        left = true;
                 }
             }
         }
 
         private static void GetVerticalAndHorizontalCenterLines(
-            LinePrimitive linePrimitive, 
-            double lineRatio, 
-            out List<Line> verticalLine, 
-            out List<Line> horizontalLine, 
+            LinePrimitive linePrimitive,
+            double lineRatio,
+            out List<Line> verticalLine,
+            out List<Line> horizontalLine,
             out Point centerPoint)
         {
             verticalLine = new List<Line>();
             horizontalLine = new List<Line>();
 
-            centerPoint = new Point((lineRatio * linePrimitive.StartPoint.X +  (1 - lineRatio) * linePrimitive.EndPoint.X), (lineRatio * linePrimitive.StartPoint.Y + (1 - lineRatio) * linePrimitive.EndPoint.Y));
+            centerPoint = new Point(
+                lineRatio * linePrimitive.StartPoint.X + (1 - lineRatio) * linePrimitive.EndPoint.X,
+                lineRatio * linePrimitive.StartPoint.Y + (1 - lineRatio) * linePrimitive.EndPoint.Y);
+
             verticalLine.Add(new Line(centerPoint, new Vector(new Point(0.0, 1.0))));
             verticalLine.Add(new Line(centerPoint, new Vector(new Point(1.0, 3.5))));
             verticalLine.Add(new Line(centerPoint, new Vector(new Point(-1.0, 3.5))));
@@ -441,94 +451,112 @@ namespace CustomPresentationPlugin
             horizontalLine.Add(new Line(centerPoint, new Vector(new Point(3.5, -1.0))));
         }
 
-        private static bool LinePrimitiveShouldBeDeleted(LinePrimitive linePrimitive, bool fullLinePrimitiveGroup, List<ModelEdgePair> modelEdgesToBeDeleted)
-        {
-            bool linePrimitiveShouldBeDeleted = false;
+        #endregion
 
+        #region Dopasowanie linii rysunku do krawędzi modelu
+
+        private static bool LinePrimitiveShouldBeDeleted(
+            LinePrimitive linePrimitive,
+            bool fullLinePrimitiveGroup,
+            List<ModelEdgePair> modelEdgesToBeDeleted)
+        {
             foreach (ModelEdgePair modelEdgeToBeDeleted in modelEdgesToBeDeleted)
             {
-                if (LinePrimitiveOverlapsWithEdgeToBeDeleted(linePrimitive, modelEdgeToBeDeleted)
-                    && (modelEdgeToBeDeleted.VisibleLine || fullLinePrimitiveGroup == modelEdgeToBeDeleted.VisibleLine))
-                {
-                    linePrimitiveShouldBeDeleted = true;
-                    break;
-                }
+                if (!LinePrimitiveOverlapsWithEdgeToBeDeleted(linePrimitive, modelEdgeToBeDeleted))
+                    continue;
+
+                if (modelEdgeToBeDeleted.VisibleLine || fullLinePrimitiveGroup == modelEdgeToBeDeleted.VisibleLine)
+                    return true;
             }
 
-            return linePrimitiveShouldBeDeleted;
+            return false;
         }
 
-        private static bool LinePrimitiveOverlapsWithEdgeToBeDeleted(LinePrimitive linePrimitive, ModelEdgePair modelEdgeToBeDeleted)
+        private static bool LinePrimitiveOverlapsWithEdgeToBeDeleted(
+            LinePrimitive linePrimitive,
+            ModelEdgePair modelEdgeToBeDeleted)
         {
-            bool linePrimitiveOverlaps = false;
+            var edge = modelEdgeToBeDeleted.ModelEdgeInDrawing;
 
-            if ((linePrimitive.StartPoint.DistanceTo(modelEdgeToBeDeleted.ModelEdgeInDrawing.StartPoint) < DrawingEpsilon
-                && linePrimitive.EndPoint.DistanceTo(modelEdgeToBeDeleted.ModelEdgeInDrawing.EndPoint) < DrawingEpsilon)
-                || (linePrimitive.StartPoint.DistanceTo(modelEdgeToBeDeleted.ModelEdgeInDrawing.EndPoint) < DrawingEpsilon
-                && linePrimitive.EndPoint.DistanceTo(modelEdgeToBeDeleted.ModelEdgeInDrawing.StartPoint) < DrawingEpsilon))
-            {
-                linePrimitiveOverlaps = true;
-            }
-            else
-            {
-                Line modelEdgeToBeDeletedLine = new Line(
-                    new Point(modelEdgeToBeDeleted.ModelEdgeInDrawing.StartPoint.X, modelEdgeToBeDeleted.ModelEdgeInDrawing.StartPoint.Y),
-                    new Point(modelEdgeToBeDeleted.ModelEdgeInDrawing.EndPoint.X, modelEdgeToBeDeleted.ModelEdgeInDrawing.EndPoint.Y));
+            bool endpointsMatch =
+                (linePrimitive.StartPoint.DistanceTo(edge.StartPoint) < DrawingEpsilon &&
+                 linePrimitive.EndPoint.DistanceTo(edge.EndPoint)   < DrawingEpsilon)
+             || (linePrimitive.StartPoint.DistanceTo(edge.EndPoint) < DrawingEpsilon &&
+                 linePrimitive.EndPoint.DistanceTo(edge.StartPoint) < DrawingEpsilon);
 
-                double distanceAllowance = modelEdgeToBeDeleted.ModelEdgeInDrawing.StartPoint.DistanceTo(modelEdgeToBeDeleted.ModelEdgeInDrawing.EndPoint) / 0.9;
+            if (endpointsMatch)
+                return true;
 
-                if ((Distance.PointToLine(new Point(linePrimitive.StartPoint.X, linePrimitive.StartPoint.Y), modelEdgeToBeDeletedLine) < DrawingEpsilon
-                    && (linePrimitive.StartPoint.DistanceTo(modelEdgeToBeDeleted.ModelEdgeInDrawing.StartPoint) < distanceAllowance || linePrimitive.StartPoint.DistanceTo(modelEdgeToBeDeleted.ModelEdgeInDrawing.EndPoint) < distanceAllowance))
-                    && (Distance.PointToLine(new Point(linePrimitive.EndPoint.X, linePrimitive.EndPoint.Y), modelEdgeToBeDeletedLine) < DrawingEpsilon
-                    && (linePrimitive.EndPoint.DistanceTo(modelEdgeToBeDeleted.ModelEdgeInDrawing.StartPoint) < distanceAllowance || linePrimitive.EndPoint.DistanceTo(modelEdgeToBeDeleted.ModelEdgeInDrawing.EndPoint) < distanceAllowance)))
-                {
-                    linePrimitiveOverlaps = true;
-                }
-            }
+            Line edgeLine = new(
+                new Point(edge.StartPoint.X, edge.StartPoint.Y),
+                new Point(edge.EndPoint.X,   edge.EndPoint.Y));
 
-            return linePrimitiveOverlaps;
+            double distanceAllowance = edge.StartPoint.DistanceTo(edge.EndPoint) / 0.9;
+
+            bool startOnLine =
+                Distance.PointToLine(new Point(linePrimitive.StartPoint.X, linePrimitive.StartPoint.Y), edgeLine) < DrawingEpsilon &&
+                (linePrimitive.StartPoint.DistanceTo(edge.StartPoint) < distanceAllowance ||
+                 linePrimitive.StartPoint.DistanceTo(edge.EndPoint)   < distanceAllowance);
+
+            bool endOnLine =
+                Distance.PointToLine(new Point(linePrimitive.EndPoint.X, linePrimitive.EndPoint.Y), edgeLine) < DrawingEpsilon &&
+                (linePrimitive.EndPoint.DistanceTo(edge.StartPoint) < distanceAllowance ||
+                 linePrimitive.EndPoint.DistanceTo(edge.EndPoint)   < distanceAllowance);
+
+            return startOnLine && endOnLine;
         }
 
-        private List<ModelEdgePair> GetModelEdgesInDrawingToBeDeletedInDrawing(TSM.Part selectedModelPart, Vector viewAxisZ)
+        #endregion
+
+        #region Analiza bryły modelu
+
+        private List<ModelEdgePair> GetModelEdgesInDrawingToBeDeletedInDrawing(
+            TSM.Part selectedModelPart,
+            Vector viewAxisZ)
         {
-            List<ModelEdgePair> modelEdgesInDrawing = new List<ModelEdgePair>();
+            var modelEdgesInDrawing = new List<ModelEdgePair>();
 
             TSM.Solid solid = selectedModelPart.GetSolid();
-            FaceEnumerator myFaceEnum = solid.GetFaceEnumerator();
-            while (myFaceEnum.MoveNext())
+            FaceEnumerator faceEnum = solid.GetFaceEnumerator();
+
+            while (faceEnum.MoveNext())
             {
-                if (myFaceEnum.Current is { } currentFace && this.FaceIsNotHorizontalNorVertical(currentFace))
+                if (faceEnum.Current is not Face currentFace)
+                    continue;
+
+                if (!FaceIsNotHorizontalNorVertical(currentFace))
+                    continue;
+
+                var facesWithSimilarNormal = GetFacesWithSimilarNormal(currentFace, solid.GetFaceEnumerator());
+
+                foreach (Face faceWithSimilarNormal in facesWithSimilarNormal)
                 {
-                    List<Face> facesWithSimilarNormal = this.GetFacesWithSimilarNormal(currentFace, solid.GetFaceEnumerator());
+                    LineSegment commonEdge = GetCommonEdge(currentFace, faceWithSimilarNormal);
+                    if (commonEdge == null)
+                        continue;
 
-                    foreach (Face faceWithSimilarNormal in facesWithSimilarNormal)
+                    Point transformedStartPoint = TransformationMatrix.Transform(commonEdge.StartPoint);
+                    Vector2 startPointInDrawing = new(
+                        transformedStartPoint.X / Scale,
+                        transformedStartPoint.Y / Scale);
+
+                    Point transformedEndPoint = TransformationMatrix.Transform(commonEdge.EndPoint);
+                    Vector2 endPointInDrawing = new(
+                        transformedEndPoint.X / Scale,
+                        transformedEndPoint.Y / Scale);
+
+                    var commonEdgeInDrawing = new LinePrimitive(startPointInDrawing, endPointInDrawing);
+
+                    Vector middleNormal = new(
+                        (currentFace.Normal.X + faceWithSimilarNormal.Normal.X) / 2.0,
+                        (currentFace.Normal.Y + faceWithSimilarNormal.Normal.Y) / 2.0,
+                        (currentFace.Normal.Z + faceWithSimilarNormal.Normal.Z) / 2.0);
+
+                    bool visibleLine = middleNormal.GetAngleBetween(viewAxisZ) < Degrees90 + SmallAngleAllowance;
+
+                    if (!CommonEdgeIsPresentInModelEdges(commonEdgeInDrawing, visibleLine, modelEdgesInDrawing))
                     {
-                        LineSegment commonEdge = this.GetCommonEdge(currentFace, faceWithSimilarNormal);
-
-                        if (commonEdge != null)
-                        {
-                            Point transformedStartPoint = this.TransformationMatrix.Transform(commonEdge.StartPoint);
-                            Vector2 startPointInDrawing = new Vector2(transformedStartPoint.X / this.Scale, transformedStartPoint.Y / this.Scale);
-
-                            Point transformedEndPoint = this.TransformationMatrix.Transform(commonEdge.EndPoint);
-                            Vector2 endPointInDrawing = new Vector2(transformedEndPoint.X / this.Scale, transformedEndPoint.Y / this.Scale);
-
-                            LinePrimitive commonEdgeInDrawing = new LinePrimitive(startPointInDrawing, endPointInDrawing);
-                            Vector middleNormal = new Vector(
-                                (currentFace.Normal.X + faceWithSimilarNormal.Normal.X) / 2.0, 
-                                (currentFace.Normal.Y + faceWithSimilarNormal.Normal.Y) / 2.0, 
-                                (currentFace.Normal.Z + faceWithSimilarNormal.Normal.Z) / 2.0);
-                            bool visibleLine = middleNormal.GetAngleBetween(viewAxisZ) < Degrees90 + SmallAngleAllowance;
-
-                            if (!visibleLine)
-                            {
-                            }
-
-                            if (!CommonEdgeIsPresentInModelEdges(commonEdgeInDrawing, visibleLine, modelEdgesInDrawing))
-                            {
-                                modelEdgesInDrawing.Add(new ModelEdgePair(commonEdgeInDrawing, visibleLine));                               
-                            }
-                        }
+                        modelEdgesInDrawing.Add(new ModelEdgePair(commonEdgeInDrawing, visibleLine));
                     }
                 }
             }
@@ -538,45 +566,42 @@ namespace CustomPresentationPlugin
 
         private bool FaceIsNotHorizontalNorVertical(Face currentFace)
         {
-            bool faceIsNotHorizontalNorVertical = true;
+            double faceAngle = currentFace.Normal.GetAngleBetween(_globalAxisZ);
 
-            double faceAngle = currentFace.Normal.GetAngleBetween(this._globalAxisZ);
+            if (faceAngle < AngleEpsilon)
+                return false;
 
-            if (faceAngle < AngleEpsilon 
-                || (Math.Abs(faceAngle - Degrees90) < AngleEpsilon)
-                || faceAngle > Degrees180 - AngleEpsilon)
-            {
-                faceIsNotHorizontalNorVertical = false;
-            }
+            if (Math.Abs(faceAngle - Degrees90) < AngleEpsilon)
+                return false;
 
-            return faceIsNotHorizontalNorVertical;
+            return !(faceAngle > Degrees180 - AngleEpsilon);
         }
 
-        private static bool CommonEdgeIsPresentInModelEdges(LinePrimitive commonEdgeInDrawing, bool visibleLine, List<ModelEdgePair> modelEdgesInDrawing)
+        private static bool CommonEdgeIsPresentInModelEdges(
+            LinePrimitive commonEdgeInDrawing,
+            bool visibleLine,
+            List<ModelEdgePair> modelEdgesInDrawing)
         {
-            bool commonEdgeIsPresentInModelEdges = false;
-
             foreach (ModelEdgePair modelEdge in modelEdgesInDrawing)
             {
-                if (((commonEdgeInDrawing.StartPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.StartPoint) < DrawingEpsilon
-                        && commonEdgeInDrawing.EndPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.EndPoint) < DrawingEpsilon)
-                        || (commonEdgeInDrawing.StartPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.EndPoint) < DrawingEpsilon
-                        && commonEdgeInDrawing.EndPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.StartPoint) < DrawingEpsilon))
-                        && modelEdge.VisibleLine == visibleLine)
-                {
-                    commonEdgeIsPresentInModelEdges = true;
-                }
+                bool sameEndPoints =
+                    (commonEdgeInDrawing.StartPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.StartPoint) < DrawingEpsilon 
+                    && commonEdgeInDrawing.EndPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.EndPoint) < DrawingEpsilon)
+                    || (commonEdgeInDrawing.StartPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.EndPoint) < DrawingEpsilon 
+                    && commonEdgeInDrawing.EndPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.StartPoint) < DrawingEpsilon);
+
+                if (sameEndPoints && modelEdge.VisibleLine == visibleLine)
+                    return true;
             }
 
-            return commonEdgeIsPresentInModelEdges;
+            return false;
         }
-            
+
         private LineSegment GetCommonEdge(Face currentFace, Face faceWithSimilarNormal)
         {
-            LineSegment commonEdge = null;
-            List<Point> commonVertexes = new List<Point>();
-            List<Point> currentFaceVertexes = GetFaceVertexes(currentFace);
-            List<Point> similarNormalVertexes = GetFaceVertexes(faceWithSimilarNormal);
+            var commonVertexes = new List<Point>();
+            var currentFaceVertexes = GetFaceVertexes(currentFace);
+            var similarNormalVertexes = GetFaceVertexes(faceWithSimilarNormal);
 
             foreach (Point currentVertex in currentFaceVertexes)
             {
@@ -589,31 +614,28 @@ namespace CustomPresentationPlugin
                 }
             }
 
-            if (commonVertexes.Count == 2)
-            {
-                commonEdge = new LineSegment(commonVertexes[0], commonVertexes[1]);
-            }
-
-            return commonEdge;
+            return commonVertexes.Count == 2
+                ? new LineSegment(commonVertexes[0], commonVertexes[1])
+                : null;
         }
 
         private static List<Point> GetFaceVertexes(Face currentFace)
         {
-            List<Point> faceVertexes = new List<Point>();
-            LoopEnumerator myLoopEnum = currentFace.GetLoopEnumerator();
+            var faceVertexes = new List<Point>();
+            LoopEnumerator loopEnum = currentFace.GetLoopEnumerator();
 
-            while (myLoopEnum.MoveNext())
+            while (loopEnum.MoveNext())
             {
-                if (myLoopEnum.Current is { } myLoop)
+                if (loopEnum.Current is not Loop loop)
+                    continue;
+
+                VertexEnumerator vertexEnum = loop.GetVertexEnumerator();
+                while (vertexEnum.MoveNext())
                 {
-                    VertexEnumerator myVertexEnum = myLoop.GetVertexEnumerator();
-                    while (myVertexEnum.MoveNext())
+                    Point vertex = vertexEnum.Current;
+                    if (vertex != null)
                     {
-                        Point myVertex = myVertexEnum.Current;
-                        if (myVertex != null)
-                        {
-                            faceVertexes.Add(myVertex);
-                        }
+                        faceVertexes.Add(vertex);
                     }
                 }
             }
@@ -623,73 +645,63 @@ namespace CustomPresentationPlugin
 
         private List<Face> GetFacesWithSimilarNormal(Face currentFace, FaceEnumerator faceEnumerator)
         {
-            List<Face> facesWithSimilarNormal = new List<Face>();
+            var facesWithSimilarNormal = new List<Face>();
 
             while (faceEnumerator.MoveNext())
             {
-                if (faceEnumerator.Current is { } secondaryFace && !secondaryFace.Equals(currentFace))
+                if (faceEnumerator.Current is not Face secondaryFace)
+                    continue;
+
+                if (secondaryFace.Equals(currentFace))
+                    continue;
+
+                if (currentFace.Normal.GetAngleBetween(secondaryFace.Normal) < BigAngleAllowance &&
+                    FaceIsNotHorizontalNorVertical(secondaryFace))
                 {
-                    if (currentFace.Normal.GetAngleBetween(secondaryFace.Normal) < BigAngleAllowance
-                        && this.FaceIsNotHorizontalNorVertical(secondaryFace))
-                    {
-                        facesWithSimilarNormal.Add(secondaryFace);
-                    }
+                    facesWithSimilarNormal.Add(secondaryFace);
                 }
             }
 
             return facesWithSimilarNormal;
         }
 
+        #endregion
+
+        #region Pomocnicze
+
         private static TSD.Part GetDrawingPart(int drawingId)
         {
             var identifier = new TS.Identifier(drawingId);
             var input = new TSP.DrawingPluginBase.InputDefinition(identifier, identifier);
-            var drawingPart = TSD.Tools.InputDefinitionFactory.GetDrawingObject(input);
-
-            return drawingPart as TSD.Part;
+            return TSD.Tools.InputDefinitionFactory.GetDrawingObject(input) as TSD.Part;
         }
 
-        /// <summary>Struct to store the assembly pair.</summary>
         private struct ModelEdgePair
         {
-            /// <summary>The assembly position.</summary>
-            public LinePrimitive ModelEdgeInDrawing;
-
-            /// <summary>The assembly.</summary>
+            public readonly LinePrimitive ModelEdgeInDrawing;
             public readonly bool VisibleLine;
 
-            /// <summary>Initializes a new instance of the <see cref="ModelEdgePair"/> struct.</summary>
-            /// <param name="assemblyPosition">The assembly position.</param>
-            /// <param name="assembly">The assembly.</param>
             public ModelEdgePair(LinePrimitive modelEdgeInDrawing, bool visibleLine)
             {
-                this.ModelEdgeInDrawing = modelEdgeInDrawing;
-                this.VisibleLine = visibleLine;
+                ModelEdgeInDrawing = modelEdgeInDrawing;
+                VisibleLine = visibleLine;
             }
         }
 
-        /// <summary>Struct to store the line intersections.</summary>
         private struct LineIntersections
         {
-            /// <summary>The line intersection 01.</summary>
             public bool Line01;
-
-            /// <summary>The line intersection 05.</summary>
             public bool Line05;
-
-            /// <summary>The line intersection 09.</summary>
             public bool Line09;
 
-            /// <summary>Initializes a new instance of the <see cref="LineIntersections"/> struct.</summary>
-            /// <param name="line01">The line intersection 01</param>
-            /// <param name="line05">The line intersection 05</param>
-            /// <param name="line05">The line intersection 09</param>
             public LineIntersections(bool line01, bool line05, bool line09)
             {
-                this.Line01 = line01;
-                this.Line05 = line05;
-                this.Line09 = line09;
+                Line01 = line01;
+                Line05 = line05;
+                Line09 = line09;
             }
         }
+
+        #endregion
     }
 }
