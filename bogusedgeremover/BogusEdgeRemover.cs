@@ -112,7 +112,6 @@ namespace BogusEdgeRemover
                 return;
 
             var newPrimitives = new List<PrimitiveBase>(primitiveGroup.Primitives.Count);
-            bool fullLinePrimitiveGroup = primitiveGroup.Pen.LineType == 1;
 
             foreach (PrimitiveBase primitiveBase in primitiveGroup.Primitives)
             {
@@ -127,7 +126,6 @@ namespace BogusEdgeRemover
                             if (!ShouldDeleteLine(
                                     splitLine,
                                     modelEdgesToBeDeleted,
-                                    fullLinePrimitiveGroup,
                                     cachedLines,
                                     ref removedHiddenLinesCount))
                             {
@@ -164,11 +162,10 @@ namespace BogusEdgeRemover
         private bool ShouldDeleteLine(
             LinePrimitive linePrimitive,
             List<ModelEdgePair> modelEdgesToBeDeleted,
-            bool fullLinePrimitiveGroup,
             List<CachedLine> cachedLines,
             ref int removedHiddenLinesCount)
         {
-            if (!LinePrimitiveShouldBeDeleted(linePrimitive, fullLinePrimitiveGroup, modelEdgesToBeDeleted))
+            if (!LinePrimitiveShouldBeDeleted(linePrimitive, modelEdgesToBeDeleted))
                 return false;
 
             if (!LinePrimitiveIsNotExternal(linePrimitive, cachedLines))
@@ -508,21 +505,16 @@ namespace BogusEdgeRemover
 
         private static bool LinePrimitiveShouldBeDeleted(
             LinePrimitive linePrimitive,
-            bool fullLinePrimitiveGroup,
             List<ModelEdgePair> modelEdgesToBeDeleted)
         {
             foreach (ModelEdgePair modelEdgeToBeDeleted in modelEdgesToBeDeleted)
             {
-                if (!LinePrimitiveOverlapsWithEdgeToBeDeleted(linePrimitive, modelEdgeToBeDeleted))
-                    continue;
-
-                if (modelEdgeToBeDeleted.VisibleLine || fullLinePrimitiveGroup == false)
+                if (LinePrimitiveOverlapsWithEdgeToBeDeleted(linePrimitive, modelEdgeToBeDeleted))
                     return true;
             }
-
             return false;
         }
-
+        
         private static bool LinePrimitiveOverlapsWithEdgeToBeDeleted(
             LinePrimitive linePrimitive,
             ModelEdgePair modelEdgeToBeDeleted)
