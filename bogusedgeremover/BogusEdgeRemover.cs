@@ -387,12 +387,15 @@ namespace BogusEdgeRemover
                     ref top, ref bottom, ref right, ref left);
             }
 
-            return
-                top    is { Line01: true, Line05: true, Line09: true } &&
-                bottom is { Line01: true, Line05: true, Line09: true } &&
-                right  is { Line01: true, Line05: true, Line09: true } &&
-                left   is { Line01: true, Line05: true, Line09: true };
+            static bool SideOk(LineIntersections s)
+            {
+                int hits = (s.Line01 ? 1 : 0) + (s.Line05 ? 1 : 0) + (s.Line09 ? 1 : 0);
+                return hits >= 2; // było "3"
+            }
+
+            return SideOk(top) && SideOk(bottom) && SideOk(right) && SideOk(left);
         }
+
 
         private static void LineOrArcPrimitiveIsNotExternal(
             List<Line> verticalLine01,
