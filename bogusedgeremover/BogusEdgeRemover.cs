@@ -387,15 +387,14 @@ namespace BogusEdgeRemover
                     ref top, ref bottom, ref right, ref left);
             }
 
+            return SideOk(top) && SideOk(bottom) && SideOk(right) && SideOk(left);
+
             static bool SideOk(LineIntersections s)
             {
                 int hits = (s.Line01 ? 1 : 0) + (s.Line05 ? 1 : 0) + (s.Line09 ? 1 : 0);
-                return hits >= 2; // było "3"
+                return hits >= 2;
             }
-
-            return SideOk(top) && SideOk(bottom) && SideOk(right) && SideOk(left);
         }
-
 
         private static void LineOrArcPrimitiveIsNotExternal(
             List<Line> verticalLine01,
@@ -629,20 +628,27 @@ namespace BogusEdgeRemover
         private static List<Face> GetFacesWithSimilarNormal(Face currentFace, FaceEnumerator faceEnumerator)
         {
             var facesWithSimilarNormal = new List<Face>();
+            const double similarNormalAllowance = Math.PI / 36.0;
 
             while (faceEnumerator.MoveNext())
             {
                 if (faceEnumerator.Current is not { } secondaryFace)
                     continue;
 
-                if (secondaryFace.Equals(currentFace))
+                if (ReferenceEquals(secondaryFace, currentFace) || secondaryFace.Equals(currentFace))
                     continue;
 
-                if (currentFace.Normal.GetAngleBetween(secondaryFace.Normal) < BigAngleAllowance &&
-                    secondaryFace.Normal.GetAngleBetween(new Vector(0,0,1)) > AngleEpsilon) // szybki filtr poziom/pion
-                {
+                double secAngleToZ = secondaryFace.Normal.GetAngleBetween(new Vector(0, 0, 1));
+                if (secAngleToZ < AngleEpsilon) 
+                    continue;
+                if (Math.Abs(secAngleToZ - Degrees90) < AngleEpsilon)
+                    continue;
+                if (secAngleToZ > Degrees180 - AngleEpsilon)
+                    continue;
+
+                double normalAngle = currentFace.Normal.GetAngleBetween(secondaryFace.Normal);
+                if (normalAngle <= similarNormalAllowance)
                     facesWithSimilarNormal.Add(secondaryFace);
-                }
             }
 
             return facesWithSimilarNormal;
