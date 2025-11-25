@@ -16,6 +16,7 @@ namespace BogusEdgeRemover
     using TS.Geometry3d;
     using TS.Solid;
 
+    # region Definicje eksportu wtyczki
     [Export(typeof(IDrawingPresentationPlugin))]
     [ExportMetadata("ObjectType", new[]
     {
@@ -25,6 +26,8 @@ namespace BogusEdgeRemover
     [ExportMetadata("BriefDescription", "Bogus Edge Remover")]
     [ExportMetadata("Description", "Presentation plugin that removes the edges of a part that are a result of a non-planar surface.")]
     [ExportMetadata("GUID", "00CE0BCD-429B-48AC-A235-DC14311204D4")]
+    # endregion
+    
     public class BogusEdgeRemover : IDrawingPresentationPlugin
     {
         #region Stałe / pola
@@ -33,7 +36,7 @@ namespace BogusEdgeRemover
         private const double DrawingEpsilon      = 0.0001;
         private const double Degrees180          = Math.PI;
         private const double Degrees90           = Math.PI / 2;
-        private const double BigAngleAllowance   = Math.PI / 2.5;
+        private const double BigAngleAllowance   = Math.PI / 16;
         private const double SmallAngleAllowance = Math.PI / 32;
         private const double AngleEpsilon        = 0.001;
 
@@ -85,21 +88,62 @@ namespace BogusEdgeRemover
             if (presentation?.Primitives == null || presentation.Primitives.Count == 0)
                 return;
 
+            // 1) Zbieramy WSZYSTKIE linie (top-level + w grupach)
             var cachedLines = BuildCachedLines(presentation);
 
             int removedHiddenLinesCount = 0;
 
+            // 2) Budujemy NOWĄ listę prymitywów na poziomie root
+            var newRootPrimitives = new List<PrimitiveBase>(presentation.Primitives.Count);
+
             foreach (var primitive in presentation.Primitives)
             {
-                if (primitive is PrimitiveGroup group)
+                switch (primitive)
                 {
-                    RemoveBogusLinesInPrimitiveGroup(
-                        modelEdgesToBeDeleted,
-                        group,
-                        cachedLines,
-                        ref removedHiddenLinesCount);
+                    case LinePrimitive linePrimitive:
+                    {
+                        // Tak samo jak w RemoveBogusLinesInPrimitiveGroup – najpierw tniemy po przecięciach
+                        var splitLines = SplitLinePrimitiveByIntersections(linePrimitive, cachedLines);
+
+                        foreach (var splitLine in splitLines)
+                        {
+                            if (!ShouldDeleteLine(
+                                    splitLine,
+                                    modelEdgesToBeDeleted,
+                                    cachedLines,
+                                    ref removedHiddenLinesCount))
+                            {
+                                newRootPrimitives.Add(splitLine);
+                            }
+                        }
+
+                        break;
+                    }
+
+                    case PrimitiveGroup group:
+                    {
+                        // Rekurencyjne czyszczenie linii wewnątrz grup
+                        RemoveBogusLinesInPrimitiveGroup(
+                            modelEdgesToBeDeleted,
+                            group,
+                            cachedLines,
+                            ref removedHiddenLinesCount);
+
+                        newRootPrimitives.Add(group);
+                        break;
+                    }
+
+                    default:
+                        // Wszystko inne zostawiamy bez zmian
+                        newRootPrimitives.Add(primitive);
+                        break;
                 }
             }
+
+            // 3) Podmieniamy zawartość Segmentu na nową
+            presentation.Primitives.Clear();
+            foreach (var p in newRootPrimitives)
+                presentation.Primitives.Add(p);
         }
 
         private void RemoveBogusLinesInPrimitiveGroup(
@@ -165,9 +209,11 @@ namespace BogusEdgeRemover
             List<CachedLine> cachedLines,
             ref int removedHiddenLinesCount)
         {
+            // Sprawdzamy, czy linia pokrywa się z krawędzią modelu do usunięcia
             if (!LinePrimitiveShouldBeDeleted(linePrimitive, modelEdgesToBeDeleted))
                 return false;
 
+            // Sprawdzamy, czy linia nie jest zewnętrzną krawędzią
             if (!LinePrimitiveIsNotExternal(linePrimitive, cachedLines))
                 return false;
 
@@ -579,11 +625,12 @@ namespace BogusEdgeRemover
                 if (faceEnum.Current is not { } currentFace)
                     continue;
 
-                if (!FaceIsNotHorizontalNorVertical(currentFace))
-                    continue;
+                // if (!FaceIsNotHorizontalNorVertical(currentFace))
+                //     continue;
 
                 var facesWithSimilarNormal = GetFacesWithSimilarNormal(currentFace, solid.GetFaceEnumerator());
 
+                // TSM.Operations.Operation.DisplayPrompt("facesWithSimilarNormal " + facesWithSimilarNormal.Count);
                 foreach (Face faceWithSimilarNormal in facesWithSimilarNormal)
                 {
                     LineSegment commonEdge = GetCommonEdge(currentFace, faceWithSimilarNormal);
@@ -628,7 +675,6 @@ namespace BogusEdgeRemover
         private static List<Face> GetFacesWithSimilarNormal(Face currentFace, FaceEnumerator faceEnumerator)
         {
             var facesWithSimilarNormal = new List<Face>();
-            const double similarNormalAllowance = Math.PI / 36.0;
 
             while (faceEnumerator.MoveNext())
             {
@@ -638,41 +684,50 @@ namespace BogusEdgeRemover
                 if (ReferenceEquals(secondaryFace, currentFace) || secondaryFace.Equals(currentFace))
                     continue;
 
-                double secAngleToZ = secondaryFace.Normal.GetAngleBetween(new Vector(0, 0, 1));
-                if (secAngleToZ < AngleEpsilon) 
-                    continue;
-                if (Math.Abs(secAngleToZ - Degrees90) < AngleEpsilon)
-                    continue;
-                if (secAngleToZ > Degrees180 - AngleEpsilon)
-                    continue;
-
                 double normalAngle = currentFace.Normal.GetAngleBetween(secondaryFace.Normal);
-                if (normalAngle <= similarNormalAllowance)
+                if (normalAngle <= BigAngleAllowance)
                     facesWithSimilarNormal.Add(secondaryFace);
             }
 
             return facesWithSimilarNormal;
         }
 
-        private static LineSegment GetCommonEdge(Face currentFace, Face faceWithSimilarNormal)
-        {
-            var commonVertexes = new List<Point>();
-
-            var currentFaceVertexes = GetFaceVertexes(currentFace);
+        private static LineSegment GetCommonEdge(Face currentFace, Face faceWithSimilarNormal) 
+        { 
+            var commonVertexes = new List<Point>(); 
+            
+            var currentFaceVertexes = GetFaceVertexes(currentFace); 
             var similarNormalVertexes = GetFaceVertexes(faceWithSimilarNormal);
-
+            
             foreach (Point currentVertex in currentFaceVertexes)
             {
                 foreach (Point similarNormalVertex in similarNormalVertexes)
                 {
                     if (Distance.PointToPoint(currentVertex, similarNormalVertex) < ModelEpsilon)
-                        commonVertexes.Add(currentVertex);
+                    {
+                        bool exists = commonVertexes.Any(v => Distance.PointToPoint(v, currentVertex) < ModelEpsilon * 0.5); 
+                        if (!exists) commonVertexes.Add(currentVertex);
+                    }
                 }
-            }
-
-            return commonVertexes.Count == 2
-                ? new LineSegment(commonVertexes[0], commonVertexes[1])
-                : null;
+            } 
+            if (commonVertexes.Count < 2) 
+                return null; 
+            
+            double bestDist = 0.0; int bestI = 0, bestJ = 1; 
+            for (int i = 0; i < commonVertexes.Count; i++) 
+            { 
+                for (int j = i + 1; j < commonVertexes.Count; j++) 
+                { 
+                    double d = Distance.PointToPoint(commonVertexes[i], commonVertexes[j]);
+                    if (d > bestDist)
+                    {
+                        bestDist = d; bestI = i; bestJ = j; 
+                        
+                    } 
+                } 
+            } 
+            
+            return bestDist < ModelEpsilon * 0.1 ? null : new LineSegment(commonVertexes[bestI], commonVertexes[bestJ]); 
         }
 
         private static List<Point> GetFaceVertexes(Face currentFace)
@@ -732,10 +787,23 @@ namespace BogusEdgeRemover
         {
             var cachedLines = new List<CachedLine>();
 
+            if (presentation?.Primitives == null)
+                return cachedLines;
+
             foreach (var primitive in presentation.Primitives)
             {
-                if (primitive is PrimitiveGroup g)
-                    CollectAllLinesFromGroup(g, cachedLines);
+                switch (primitive)
+                {
+                    case LinePrimitive lp:
+                        // NOWE: cache także linii z poziomu root
+                        cachedLines.Add(new CachedLine(lp));
+                        break;
+
+                    case PrimitiveGroup g:
+                        // Jak wcześniej: zbieramy linie z grup (rekurencyjnie)
+                        CollectAllLinesFromGroup(g, cachedLines);
+                        break;
+                }
             }
 
             return cachedLines;
