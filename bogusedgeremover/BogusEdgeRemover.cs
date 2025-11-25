@@ -692,42 +692,33 @@ namespace BogusEdgeRemover
             return facesWithSimilarNormal;
         }
 
-        private static LineSegment GetCommonEdge(Face currentFace, Face faceWithSimilarNormal) 
-        { 
-            var commonVertexes = new List<Point>(); 
-            
-            var currentFaceVertexes = GetFaceVertexes(currentFace); 
+        private static LineSegment GetCommonEdge(Face currentFace, Face faceWithSimilarNormal)
+        {
+            var commonVertexes = new List<Point>();
+
+            var currentFaceVertexes   = GetFaceVertexes(currentFace);
             var similarNormalVertexes = GetFaceVertexes(faceWithSimilarNormal);
-            
+
             foreach (Point currentVertex in currentFaceVertexes)
             {
                 foreach (Point similarNormalVertex in similarNormalVertexes)
                 {
                     if (Distance.PointToPoint(currentVertex, similarNormalVertex) < ModelEpsilon)
                     {
-                        bool exists = commonVertexes.Any(v => Distance.PointToPoint(v, currentVertex) < ModelEpsilon * 0.5); 
-                        if (!exists) commonVertexes.Add(currentVertex);
+                        bool exists = commonVertexes.Any(v =>
+                            Distance.PointToPoint(v, currentVertex) < ModelEpsilon * 0.5);
+
+                        if (!exists)
+                            commonVertexes.Add(currentVertex);
                     }
                 }
-            } 
-            if (commonVertexes.Count < 2) 
-                return null; 
-            
-            double bestDist = 0.0; int bestI = 0, bestJ = 1; 
-            for (int i = 0; i < commonVertexes.Count; i++) 
-            { 
-                for (int j = i + 1; j < commonVertexes.Count; j++) 
-                { 
-                    double d = Distance.PointToPoint(commonVertexes[i], commonVertexes[j]);
-                    if (d > bestDist)
-                    {
-                        bestDist = d; bestI = i; bestJ = j; 
-                        
-                    } 
-                } 
-            } 
-            
-            return bestDist < ModelEpsilon * 0.1 ? null : new LineSegment(commonVertexes[bestI], commonVertexes[bestJ]); 
+            }
+
+            if (commonVertexes.Count != 2)
+                return null;
+
+            double d = Distance.PointToPoint(commonVertexes[0], commonVertexes[1]);
+            return d < ModelEpsilon * 0.1 ? null : new LineSegment(commonVertexes[0], commonVertexes[1]);
         }
 
         private static List<Point> GetFaceVertexes(Face currentFace)
