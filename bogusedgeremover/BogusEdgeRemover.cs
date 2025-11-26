@@ -87,13 +87,11 @@ namespace BogusEdgeRemover
         {
             if (presentation?.Primitives == null || presentation.Primitives.Count == 0)
                 return;
-
-            // 1) Zbieramy WSZYSTKIE linie (top-level + w grupach)
+            
             var cachedLines = BuildCachedLines(presentation);
 
             int removedHiddenLinesCount = 0;
 
-            // 2) Budujemy NOWĄ listę prymitywów na poziomie root
             var newRootPrimitives = new List<PrimitiveBase>(presentation.Primitives.Count);
 
             foreach (var primitive in presentation.Primitives)
@@ -102,7 +100,6 @@ namespace BogusEdgeRemover
                 {
                     case LinePrimitive linePrimitive:
                     {
-                        // Tak samo jak w RemoveBogusLinesInPrimitiveGroup – najpierw tniemy po przecięciach
                         var splitLines = SplitLinePrimitiveByIntersections(linePrimitive, cachedLines);
 
                         foreach (var splitLine in splitLines)
@@ -122,7 +119,6 @@ namespace BogusEdgeRemover
 
                     case PrimitiveGroup group:
                     {
-                        // Rekurencyjne czyszczenie linii wewnątrz grup
                         RemoveBogusLinesInPrimitiveGroup(
                             modelEdgesToBeDeleted,
                             group,
@@ -134,13 +130,11 @@ namespace BogusEdgeRemover
                     }
 
                     default:
-                        // Wszystko inne zostawiamy bez zmian
                         newRootPrimitives.Add(primitive);
                         break;
                 }
             }
 
-            // 3) Podmieniamy zawartość Segmentu na nową
             presentation.Primitives.Clear();
             foreach (var p in newRootPrimitives)
                 presentation.Primitives.Add(p);
@@ -209,11 +203,9 @@ namespace BogusEdgeRemover
             List<CachedLine> cachedLines,
             ref int removedHiddenLinesCount)
         {
-            // Sprawdzamy, czy linia pokrywa się z krawędzią modelu do usunięcia
             if (!LinePrimitiveShouldBeDeleted(linePrimitive, modelEdgesToBeDeleted))
                 return false;
 
-            // Sprawdzamy, czy linia nie jest zewnętrzną krawędzią
             if (!LinePrimitiveIsNotExternal(linePrimitive, cachedLines))
                 return false;
 
@@ -659,18 +651,18 @@ namespace BogusEdgeRemover
             return modelEdgesInDrawing;
         }
 
-        private bool FaceIsNotHorizontalNorVertical(Face currentFace)
-        {
-            double faceAngle = currentFace.Normal.GetAngleBetween(_globalAxisZ);
-
-            if (faceAngle < AngleEpsilon)
-                return false;
-
-            if (Math.Abs(faceAngle - Degrees90) < AngleEpsilon)
-                return false;
-
-            return !(faceAngle > Degrees180 - AngleEpsilon);
-        }
+        // private bool FaceIsNotHorizontalNorVertical(Face currentFace)
+        // {
+        //     double faceAngle = currentFace.Normal.GetAngleBetween(_globalAxisZ);
+        //
+        //     if (faceAngle < AngleEpsilon)
+        //         return false;
+        //
+        //     if (Math.Abs(faceAngle - Degrees90) < AngleEpsilon)
+        //         return false;
+        //
+        //     return !(faceAngle > Degrees180 - AngleEpsilon);
+        // }
 
         private static List<Face> GetFacesWithSimilarNormal(Face currentFace, FaceEnumerator faceEnumerator)
         {
@@ -714,11 +706,75 @@ namespace BogusEdgeRemover
                 }
             }
 
-            if (commonVertexes.Count != 2)
+            int count = commonVertexes.Count;
+
+            switch (count) {
+                case < 2:
+                    return null;
+                case 2:
+                    return new LineSegment(commonVertexes[0], commonVertexes[1]);
+                case > 6:
+                    return null;
+            }
+
+            Point p0 = commonVertexes[0];
+
+            Point p1 = null;
+            double maxDist = 0.0;
+
+            for (int i = 1; i < count; i++)
+            {
+                double d = Distance.PointToPoint(p0, commonVertexes[i]);
+                if (d > ModelEpsilon * 0.5 && d > maxDist)
+                {
+                    maxDist = d;
+                    p1 = commonVertexes[i];
+                }
+            }
+
+            if (p1 == null)
                 return null;
 
-            double d = Distance.PointToPoint(commonVertexes[0], commonVertexes[1]);
-            return d < ModelEpsilon * 0.1 ? null : new LineSegment(commonVertexes[0], commonVertexes[1]);
+            var dir = new Vector(p1.X - p0.X, p1.Y - p0.Y, p1.Z - p0.Z);
+            double dirLen = dir.GetLength();
+            if (dirLen < ModelEpsilon * 0.5)
+                return null;
+
+            dir.Normalize();
+
+            double minT = 0.0;
+            double maxT = Vector.Dot(new Vector(p1.X - p0.X, p1.Y - p0.Y, p1.Z - p0.Z), dir);
+
+            foreach (var p in commonVertexes)
+            {
+                var v = new Vector(p.X - p0.X, p.Y - p0.Y, p.Z - p0.Z);
+                double t = Vector.Dot(v, dir);
+
+                var closest = new Point(
+                    p0.X + dir.X * t,
+                    p0.Y + dir.Y * t,
+                    p0.Z + dir.Z * t);
+
+                double off = Distance.PointToPoint(p, closest);
+
+                if (off > ModelEpsilon * 0.5)
+                    return null;
+
+                if (t < minT) minT = t;
+                if (t > maxT) maxT = t;
+            }
+
+            var start = new Point(
+                p0.X + dir.X * minT,
+                p0.Y + dir.Y * minT,
+                p0.Z + dir.Z * minT);
+
+            var end = new Point(
+                p0.X + dir.X * maxT,
+                p0.Y + dir.Y * maxT,
+                p0.Z + dir.Z * maxT);
+
+            return Distance.PointToPoint(start, end) < DrawingEpsilon ? null : new LineSegment(start, end);
         }
 
         private static List<Point> GetFaceVertexes(Face currentFace)
@@ -786,12 +842,10 @@ namespace BogusEdgeRemover
                 switch (primitive)
                 {
                     case LinePrimitive lp:
-                        // NOWE: cache także linii z poziomu root
                         cachedLines.Add(new CachedLine(lp));
                         break;
 
                     case PrimitiveGroup g:
-                        // Jak wcześniej: zbieramy linie z grup (rekurencyjnie)
                         CollectAllLinesFromGroup(g, cachedLines);
                         break;
                 }
