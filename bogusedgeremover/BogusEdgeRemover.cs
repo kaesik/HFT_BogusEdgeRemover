@@ -203,10 +203,30 @@ namespace BogusEdgeRemover
             List<CachedLine> cachedLines,
             ref int removedHiddenLinesCount)
         {
-            if (!LinePrimitiveShouldBeDeleted(linePrimitive, modelEdgesToBeDeleted))
+            bool isInternal  = LinePrimitiveIsNotExternal(linePrimitive, cachedLines);
+            bool isExternal  = !isInternal;
+
+            bool overlapsAny             = false;
+            bool overlapsVisibleExternal = false;
+
+            foreach (var modelEdge in modelEdgesToBeDeleted)
+            {
+                if (!LinePrimitiveOverlapsWithEdgeToBeDeleted(linePrimitive, modelEdge))
+                    continue;
+
+                overlapsAny = true;
+
+                if (modelEdge.VisibleLine && isExternal)
+                {
+                    overlapsVisibleExternal = true;
+                    break;
+                }
+            }
+
+            if (overlapsVisibleExternal)
                 return false;
 
-            if (!LinePrimitiveIsNotExternal(linePrimitive, cachedLines))
+            if (!overlapsAny)
                 return false;
 
             removedHiddenLinesCount++;
@@ -427,10 +447,11 @@ namespace BogusEdgeRemover
 
             return SideOk(top) && SideOk(bottom) && SideOk(right) && SideOk(left);
 
-            static bool SideOk(LineIntersections s)
+             static bool SideOk(LineIntersections s)
             {
                 int hits = (s.Line01 ? 1 : 0) + (s.Line05 ? 1 : 0) + (s.Line09 ? 1 : 0);
-                return hits >= 2;
+    
+                return hits >= 3;
             }
         }
 
@@ -605,7 +626,9 @@ namespace BogusEdgeRemover
 
         #region Analiza bryły modelu
 
-        private List<ModelEdgePair> GetModelEdgesInDrawingToBeDeletedInDrawing(TSM.Part selectedModelPart, Vector viewAxisZ)
+        private List<ModelEdgePair> GetModelEdgesInDrawingToBeDeletedInDrawing(
+            TSM.Part selectedModelPart,
+            Vector viewAxisZ)
         {
             var modelEdgesInDrawing = new List<ModelEdgePair>();
 
@@ -622,11 +645,16 @@ namespace BogusEdgeRemover
 
                 var facesWithSimilarNormal = GetFacesWithSimilarNormal(currentFace, solid.GetFaceEnumerator());
 
-                // TSM.Operations.Operation.DisplayPrompt("facesWithSimilarNormal " + facesWithSimilarNormal.Count);
                 foreach (Face faceWithSimilarNormal in facesWithSimilarNormal)
                 {
                     LineSegment commonEdge = GetCommonEdge(currentFace, faceWithSimilarNormal);
                     if (commonEdge == null)
+                        continue;
+
+                    double dot1 = Vector.Dot(currentFace.Normal,           viewAxisZ);
+                    double dot2 = Vector.Dot(faceWithSimilarNormal.Normal, viewAxisZ);
+
+                    if (dot1 * dot2 < 0)
                         continue;
 
                     Point transformedStartPoint = TransformationMatrix.Transform(commonEdge.StartPoint);
@@ -650,6 +678,7 @@ namespace BogusEdgeRemover
 
             return modelEdgesInDrawing;
         }
+
 
         // private bool FaceIsNotHorizontalNorVertical(Face currentFace)
         // {
