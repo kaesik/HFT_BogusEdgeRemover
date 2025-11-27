@@ -11,17 +11,18 @@
 	<UseWpf>true</UseWpf>
 	<BaseOutputPath></BaseOutputPath>
   <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  <RootNamespace>BogusEdgeRemover</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.ComponentModel.Composition" Version="10.0.0" />
-    <PackageReference Include="Tekla.Application.Library" Version="2025.0.0" />
+    <PackageReference Include="Tekla.Application.Library" Version="2024.0.4" />
     <PackageReference Include="Tekla.Common.Geometry" Version="4.6.4" />
-    <PackageReference Include="Tekla.Structures" Version="2025.0.0" />
-    <PackageReference Include="Tekla.Structures.Datatype" Version="2025.0.0" />
-    <PackageReference Include="Tekla.Structures.Drawing" Version="2025.0.0" />
-    <PackageReference Include="Tekla.Structures.DrawingPresentationModel" Version="2025.0.0" />
-    <PackageReference Include="Tekla.Structures.DrawingPresentationPluginInterface" Version="2025.0.0" />
-    <PackageReference Include="Tekla.Structures.Model" Version="2025.0.0" />
-    <PackageReference Include="Tekla.Structures.Plugins" Version="2025.0.0" />
+    <PackageReference Include="Tekla.Structures" Version="2024.0.4" />
+    <PackageReference Include="Tekla.Structures.Datatype" Version="2024.0.4" />
+    <PackageReference Include="Tekla.Structures.Drawing" Version="2024.0.4" />
+    <PackageReference Include="Tekla.Structures.DrawingPresentationModel" Version="2024.0.4" />
+    <PackageReference Include="Tekla.Structures.DrawingPresentationPluginInterface" Version="2024.0.4" />
+    <PackageReference Include="Tekla.Structures.Model" Version="2024.0.4" />
+    <PackageReference Include="Tekla.Structures.Plugins" Version="2024.0.4" />
   </ItemGroup>
 </Project>

@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
 VisualStudioVersion = 16.0.29519.87
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BogusEdgeRemover", "BogusEdgeRemover\BogusEdgeRemover.csproj", "{355B7288-DD3A-4DD5-B8B9-ADCB4C26A7FC}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TriangulationSmoother", "TriangulationSmoother\TriangulationSmoother.csproj", "{355B7288-DD3A-4DD5-B8B9-ADCB4C26A7FC}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
