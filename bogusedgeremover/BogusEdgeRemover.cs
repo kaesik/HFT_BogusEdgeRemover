@@ -451,7 +451,7 @@ namespace BogusEdgeRemover
             {
                 int hits = (s.Line01 ? 1 : 0) + (s.Line05 ? 1 : 0) + (s.Line09 ? 1 : 0);
     
-                return hits >= 3;
+                return hits >= 2;
             }
         }
 
