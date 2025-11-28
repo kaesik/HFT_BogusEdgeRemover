@@ -73,7 +73,10 @@ namespace BogusEdgeRemover
             List<ModelEdgePair> edgesToDelete =
                 GetModelEdgesInDrawingToBeDeletedInDrawing(modelPart, viewAxisZ);
 
-            RemoveBogusLines(presentation, edgesToDelete, isUnfolded);
+            List<LinePrimitive> modelEdgesToKeep =
+                GetModelEdgesInDrawingToKeep(modelPart, viewAxisZ);
+
+            RemoveBogusLines(presentation, edgesToDelete, modelEdgesToKeep, isUnfolded);
 
             return presentation;
         }
@@ -85,6 +88,7 @@ namespace BogusEdgeRemover
         private void RemoveBogusLines(
             Segment presentation,
             List<ModelEdgePair> modelEdgesToBeDeleted,
+            List<LinePrimitive> modelEdgesToKeep,
             bool isUnfoldedView)
         {
             if (presentation?.Primitives == null || presentation.Primitives.Count == 0)
@@ -116,6 +120,7 @@ namespace BogusEdgeRemover
                             if (!ShouldDeleteLine(
                                     linePrimitive,
                                     modelEdgesToBeDeleted,
+                                    modelEdgesToKeep,
                                     cachedLines,
                                     graph,
                                     true,
@@ -131,6 +136,7 @@ namespace BogusEdgeRemover
                         {
                             RemoveBogusLinesInPrimitiveGroup(
                                 modelEdgesToBeDeleted,
+                                modelEdgesToKeep,
                                 group,
                                 cachedLines,
                                 graph,
@@ -173,6 +179,7 @@ namespace BogusEdgeRemover
                             if (!ShouldDeleteLine(
                                     splitLine,
                                     modelEdgesToBeDeleted,
+                                    modelEdgesToKeep,
                                     cachedLinesNonUnfolded,
                                     graphNonUnfolded,
                                     false,
@@ -189,6 +196,7 @@ namespace BogusEdgeRemover
                     {
                         RemoveBogusLinesInPrimitiveGroup(
                             modelEdgesToBeDeleted,
+                            modelEdgesToKeep,
                             group,
                             cachedLinesNonUnfolded,
                             graphNonUnfolded,
@@ -212,6 +220,7 @@ namespace BogusEdgeRemover
 
         private void RemoveBogusLinesInPrimitiveGroup(
             List<ModelEdgePair> modelEdgesToBeDeleted,
+            List<LinePrimitive> modelEdgesToKeep,
             PrimitiveGroup primitiveGroup,
             List<CachedLine> cachedLines,
             LineGraph graph,
@@ -234,6 +243,7 @@ namespace BogusEdgeRemover
                             if (!ShouldDeleteLine(
                                     linePrimitive,
                                     modelEdgesToBeDeleted,
+                                    modelEdgesToKeep,
                                     cachedLines,
                                     graph,
                                     isUnfoldedView,
@@ -251,6 +261,7 @@ namespace BogusEdgeRemover
                                 if (!ShouldDeleteLine(
                                         splitLine,
                                         modelEdgesToBeDeleted,
+                                        modelEdgesToKeep,
                                         cachedLines,
                                         graph,
                                         isUnfoldedView,
@@ -268,6 +279,7 @@ namespace BogusEdgeRemover
                     {
                         RemoveBogusLinesInPrimitiveGroup(
                             modelEdgesToBeDeleted,
+                            modelEdgesToKeep,
                             nestedGroup,
                             cachedLines,
                             graph,
@@ -292,6 +304,7 @@ namespace BogusEdgeRemover
         private bool ShouldDeleteLine(
             LinePrimitive linePrimitive,
             List<ModelEdgePair> modelEdgesToBeDeleted,
+            List<LinePrimitive> modelEdgesToKeep,
             List<CachedLine> cachedLines,
             LineGraph graph,
             bool isUnfoldedView,
@@ -299,54 +312,71 @@ namespace BogusEdgeRemover
         {
             bool isInternal = LinePrimitiveIsNotExternal(linePrimitive, cachedLines);
 
-            if (!isUnfoldedView)
+            if (isUnfoldedView)
             {
+                bool overlapsDeleteEdge = false;
+                if (modelEdgesToBeDeleted != null && modelEdgesToBeDeleted.Count > 0)
+                {
+                    foreach (var modelEdge in modelEdgesToBeDeleted)
+                    {
+                        if (!LinePrimitiveOverlapsWithEdgeToBeDeleted(linePrimitive, modelEdge))
+                            continue;
+
+                        overlapsDeleteEdge = true;
+                        break;
+                    }
+                }
+
+                bool overlapsKeepEdge = false;
+                if (modelEdgesToKeep != null && modelEdgesToKeep.Count > 0)
+                {
+                    foreach (var keepEdge in modelEdgesToKeep)
+                    {
+                        if (LinePrimitiveOverlapsWithModelEdge(linePrimitive, keepEdge))
+                        {
+                            overlapsKeepEdge = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (overlapsDeleteEdge && isInternal)
+                {
+                    removedHiddenLinesCount++;
+                    return true;
+                }
+
+                if (overlapsKeepEdge)
+                    return false;
+
                 if (!isInternal)
                     return false;
 
-                bool overlapsAny = false;
-
-                foreach (var modelEdge in modelEdgesToBeDeleted)
+                if (graph != null && IsDiagonalInGraph(linePrimitive, graph))
                 {
-                    if (!LinePrimitiveOverlapsWithEdgeToBeDeleted(linePrimitive, modelEdge))
-                        continue;
-
-                    overlapsAny = true;
-                    break;
+                    removedHiddenLinesCount++;
+                    return true;
                 }
 
-                if (!overlapsAny)
-                    return false;
-
-                removedHiddenLinesCount++;
-                return true;
+                return false;
             }
 
             if (!isInternal)
                 return false;
 
-            if (graph == null || modelEdgesToBeDeleted == null || modelEdgesToBeDeleted.Count == 0)
+            if (modelEdgesToBeDeleted == null || modelEdgesToBeDeleted.Count == 0)
                 return false;
-
-            bool overlapsUnfolded = false;
 
             foreach (var modelEdge in modelEdgesToBeDeleted)
             {
                 if (!LinePrimitiveOverlapsWithEdgeToBeDeleted(linePrimitive, modelEdge))
                     continue;
 
-                overlapsUnfolded = true;
-                break;
+                removedHiddenLinesCount++;
+                return true;
             }
 
-            if (!overlapsUnfolded)
-                return false;
-
-            if (!IsDiagonalInGraph(linePrimitive, graph))
-                return false;
-
-            removedHiddenLinesCount++;
-            return true;
+            return false;
         }
 
         #endregion
@@ -675,6 +705,65 @@ namespace BogusEdgeRemover
             horizontalLine.Add(new Line(centerPoint, new Vector(new Point(3.5, 1.0))));
             horizontalLine.Add(new Line(centerPoint, new Vector(new Point(3.5, -1.0))));
         }
+        
+        private List<LinePrimitive> GetModelEdgesInDrawingToKeep(
+            TSM.Part selectedModelPart,
+            Vector viewAxisZ)
+        {
+            var modelEdgesInDrawing = new List<LinePrimitive>();
+
+            TSM.Solid solid = selectedModelPart.GetSolid();
+            FaceEnumerator faceEnum = solid.GetFaceEnumerator();
+
+            while (faceEnum.MoveNext())
+            {
+                if (faceEnum.Current is not { } currentFace)
+                    continue;
+
+                LoopEnumerator loopEnum = currentFace.GetLoopEnumerator();
+
+                while (loopEnum.MoveNext())
+                {
+                    if (loopEnum.Current is not { } loop)
+                        continue;
+
+                    var vertices = new List<Point>();
+                    VertexEnumerator vertexEnum = loop.GetVertexEnumerator();
+
+                    while (vertexEnum.MoveNext())
+                    {
+                        Point vertex = vertexEnum.Current;
+                        if (vertex != null)
+                            vertices.Add(vertex);
+                    }
+
+                    int count = vertices.Count;
+                    if (count < 2)
+                        continue;
+
+                    for (int i = 0; i < count; i++)
+                    {
+                        Point p0 = vertices[i];
+                        Point p1 = vertices[(i + 1) % count];
+
+                        if (Distance.PointToPoint(p0, p1) < ModelEpsilon * 0.5)
+                            continue;
+
+                        Point t0 = TransformationMatrix.Transform(p0);
+                        Point t1 = TransformationMatrix.Transform(p1);
+
+                        var edgeInDrawing = new LinePrimitive(
+                            new Vector2(t0.X / Scale, t0.Y / Scale),
+                            new Vector2(t1.X / Scale, t1.Y / Scale));
+
+                        if (!ModelEdgeIsPresentInList(edgeInDrawing, modelEdgesInDrawing))
+                            modelEdgesInDrawing.Add(edgeInDrawing);
+                    }
+                }
+            }
+
+            return modelEdgesInDrawing;
+        }
 
         #endregion
 
@@ -725,6 +814,51 @@ namespace BogusEdgeRemover
 
             return overlapLen >= lpLen * 0.8;
         }
+        
+        private static bool LinePrimitiveOverlapsWithModelEdge(
+            LinePrimitive linePrimitive,
+            LinePrimitive modelEdge)
+        {
+            Line edgeLine = new(
+                new Point(modelEdge.StartPoint.X, modelEdge.StartPoint.Y),
+                new Point(modelEdge.EndPoint.X,   modelEdge.EndPoint.Y));
+
+            var lpStart = new Point(linePrimitive.StartPoint.X, linePrimitive.StartPoint.Y);
+            var lpEnd   = new Point(linePrimitive.EndPoint.X,   linePrimitive.EndPoint.Y);
+
+            if (Distance.PointToLine(lpStart, edgeLine) > DrawingEpsilon ||
+                Distance.PointToLine(lpEnd,   edgeLine) > DrawingEpsilon)
+                return false;
+
+            var e0 = new Point(modelEdge.StartPoint.X, modelEdge.StartPoint.Y);
+            var e1 = new Point(modelEdge.EndPoint.X,   modelEdge.EndPoint.Y);
+
+            var edgeDir = new Vector(e1.X - e0.X, e1.Y - e0.Y, 0);
+            double edgeLen = edgeDir.GetLength();
+            if (edgeLen < DrawingEpsilon)
+                return false;
+
+            var edgeDirUnit = new Vector(edgeDir);
+            edgeDirUnit.Normalize();
+
+            double tLp0 = Vector.Dot(new Vector(lpStart.X - e0.X, lpStart.Y - e0.Y, 0), edgeDirUnit);
+            double tLp1 = Vector.Dot(new Vector(lpEnd.X   - e0.X, lpEnd.Y   - e0.Y, 0), edgeDirUnit);
+
+            double lpMin = Math.Min(tLp0, tLp1);
+            double lpMax = Math.Max(tLp0, tLp1);
+
+            double overlapMin = Math.Max(lpMin, 0.0);
+            double overlapMax = Math.Min(lpMax, edgeLen);
+
+            if (overlapMax - overlapMin <= DrawingEpsilon)
+                return false;
+
+            double overlapLen = overlapMax - overlapMin;
+            double lpLen = Distance.PointToPoint(lpStart, lpEnd);
+
+            return overlapLen >= lpLen * 0.8;
+        }
+
 
         #endregion
 
@@ -956,7 +1090,26 @@ namespace BogusEdgeRemover
 
         #region Pomocnicze (Drawing / cache)
         
-        private void SplitLinesInPrimitiveList(
+        private static bool ModelEdgeIsPresentInList(
+            LinePrimitive edge,
+            List<LinePrimitive> list)
+        {
+            foreach (var e in list)
+            {
+                bool sameEndPoints =
+                    (edge.StartPoint.DistanceTo(e.StartPoint) < DrawingEpsilon &&
+                     edge.EndPoint.DistanceTo(e.EndPoint)     < DrawingEpsilon)
+                    || (edge.StartPoint.DistanceTo(e.EndPoint) < DrawingEpsilon &&
+                        edge.EndPoint.DistanceTo(e.StartPoint) < DrawingEpsilon);
+
+                if (sameEndPoints)
+                    return true;
+            }
+
+            return false;
+        }
+        
+        private static void SplitLinesInPrimitiveList(
             IList<PrimitiveBase> primitives,
             List<CachedLine> cachedLines,
             List<PrimitiveBase> output)
