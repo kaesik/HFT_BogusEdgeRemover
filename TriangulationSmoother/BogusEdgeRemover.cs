@@ -16,7 +16,8 @@ namespace BogusEdgeRemover
     using TS.Geometry3d;
     using TS.Solid;
 
-    # region Definicje eksportu wtyczki
+    #region Definicje eksportu wtyczki
+
     [Export(typeof(IDrawingPresentationPlugin))]
     [ExportMetadata("ObjectType", new[]
     {
@@ -26,8 +27,8 @@ namespace BogusEdgeRemover
     [ExportMetadata("BriefDescription", "TriangulationSmoother")]
     [ExportMetadata("Description", "Plugin that cleans and smooths mesh triangulation by removing artificial edges created by non-planar surfaces")]
     [ExportMetadata("GUID", "00CE0BCD-429B-48AC-A235-DC14311204D4")]
-    # endregion
-    
+
+    #endregion
     public class BogusEdgeRemover : IDrawingPresentationPlugin
     {
         #region Stałe / pola
@@ -37,6 +38,7 @@ namespace BogusEdgeRemover
         private const double Degrees90           = Math.PI / 2;
         private const double BigAngleAllowance   = Math.PI / 16;
         private const double SmallAngleAllowance = Math.PI / 32;
+
         private readonly TSM.Model _model = new();
 
         private double Scale { get; set; }
@@ -74,7 +76,7 @@ namespace BogusEdgeRemover
                 GetModelEdgesInDrawingToBeDeletedInDrawing(modelPart, viewAxisZ);
 
             List<LinePrimitive> modelEdgesToKeep =
-                GetModelEdgesInDrawingToKeep(modelPart, viewAxisZ);
+                GetModelEdgesInDrawingToKeep(modelPart);
 
             RemoveBogusLines(presentation, edgesToDelete, modelEdgesToKeep, isUnfolded);
 
@@ -83,7 +85,7 @@ namespace BogusEdgeRemover
 
         #endregion
 
-        #region Główna logika usuwania / dzielenia
+        #region Główna logika – pipeline usuwania linii
 
         private void RemoveBogusLines(
             Segment presentation,
@@ -161,7 +163,6 @@ namespace BogusEdgeRemover
             }
 
             var cachedLinesNonUnfolded = BuildCachedLines(presentation);
-            LineGraph graphNonUnfolded = null;
 
             int removedHiddenLinesCountNonUnfolded = 0;
             var newRootPrimitivesNonUnfolded = new List<PrimitiveBase>(presentation.Primitives.Count);
@@ -181,7 +182,7 @@ namespace BogusEdgeRemover
                                     modelEdgesToBeDeleted,
                                     modelEdgesToKeep,
                                     cachedLinesNonUnfolded,
-                                    graphNonUnfolded,
+                                    null,
                                     false,
                                     ref removedHiddenLinesCountNonUnfolded))
                             {
@@ -199,7 +200,7 @@ namespace BogusEdgeRemover
                             modelEdgesToKeep,
                             group,
                             cachedLinesNonUnfolded,
-                            graphNonUnfolded,
+                            null,
                             false,
                             ref removedHiddenLinesCountNonUnfolded);
 
@@ -246,7 +247,7 @@ namespace BogusEdgeRemover
                                     modelEdgesToKeep,
                                     cachedLines,
                                     graph,
-                                    isUnfoldedView,
+                                    true,
                                     ref removedHiddenLinesCount))
                             {
                                 newPrimitives.Add(linePrimitive);
@@ -264,7 +265,7 @@ namespace BogusEdgeRemover
                                         modelEdgesToKeep,
                                         cachedLines,
                                         graph,
-                                        isUnfoldedView,
+                                        false,
                                         ref removedHiddenLinesCount))
                                 {
                                     newPrimitives.Add(splitLine);
@@ -315,7 +316,7 @@ namespace BogusEdgeRemover
             if (isUnfoldedView)
             {
                 bool overlapsDeleteEdge = false;
-                if (modelEdgesToBeDeleted != null && modelEdgesToBeDeleted.Count > 0)
+                if (modelEdgesToBeDeleted is { Count: > 0 })
                 {
                     foreach (var modelEdge in modelEdgesToBeDeleted)
                     {
@@ -328,7 +329,7 @@ namespace BogusEdgeRemover
                 }
 
                 bool overlapsKeepEdge = false;
-                if (modelEdgesToKeep != null && modelEdgesToKeep.Count > 0)
+                if (modelEdgesToKeep is { Count: > 0 })
                 {
                     foreach (var keepEdge in modelEdgesToKeep)
                     {
@@ -559,7 +560,7 @@ namespace BogusEdgeRemover
 
         #endregion
 
-        #region Wewnętrzna / zewnętrzna krawędź (na cache)
+        #region Klasyfikacja: krawędź wewnętrzna / zewnętrzna
 
         private bool LinePrimitiveIsNotExternal(LinePrimitive linePrimitive, List<CachedLine> cachedLines)
         {
@@ -593,10 +594,9 @@ namespace BogusEdgeRemover
 
             return SideOk(top) && SideOk(bottom) && SideOk(right) && SideOk(left);
 
-             static bool SideOk(LineIntersections s)
+            static bool SideOk(LineIntersections s)
             {
                 int hits = (s.Line01 ? 1 : 0) + (s.Line05 ? 1 : 0) + (s.Line09 ? 1 : 0);
-    
                 return hits >= 2;
             }
         }
@@ -705,10 +705,13 @@ namespace BogusEdgeRemover
             horizontalLine.Add(new Line(centerPoint, new Vector(new Point(3.5, 1.0))));
             horizontalLine.Add(new Line(centerPoint, new Vector(new Point(3.5, -1.0))));
         }
-        
+
+        #endregion
+
+        #region Krawędzie modelu – zbieranie / dopasowanie do rysunku
+
         private List<LinePrimitive> GetModelEdgesInDrawingToKeep(
-            TSM.Part selectedModelPart,
-            Vector viewAxisZ)
+            TSM.Part selectedModelPart)
         {
             var modelEdgesInDrawing = new List<LinePrimitive>();
 
@@ -765,10 +768,6 @@ namespace BogusEdgeRemover
             return modelEdgesInDrawing;
         }
 
-        #endregion
-
-        #region Dopasowanie linii rysunku do krawędzi modelu
-        
         private static bool LinePrimitiveOverlapsWithEdgeToBeDeleted(
             LinePrimitive linePrimitive,
             ModelEdgePair modelEdgeToBeDeleted)
@@ -814,7 +813,7 @@ namespace BogusEdgeRemover
 
             return overlapLen >= lpLen * 0.8;
         }
-        
+
         private static bool LinePrimitiveOverlapsWithModelEdge(
             LinePrimitive linePrimitive,
             LinePrimitive modelEdge)
@@ -859,10 +858,9 @@ namespace BogusEdgeRemover
             return overlapLen >= lpLen * 0.8;
         }
 
-
         #endregion
 
-        #region Analiza bryły modelu
+        #region Analiza bryły modelu – krawędzie do usunięcia
 
         private List<ModelEdgePair> GetModelEdgesInDrawingToBeDeletedInDrawing(
             TSM.Part selectedModelPart,
@@ -877,9 +875,6 @@ namespace BogusEdgeRemover
             {
                 if (faceEnum.Current is not { } currentFace)
                     continue;
-
-                // if (!FaceIsNotHorizontalNorVertical(currentFace))
-                //     continue;
 
                 var facesWithSimilarNormal = GetFacesWithSimilarNormal(currentFace, solid.GetFaceEnumerator());
 
@@ -916,20 +911,6 @@ namespace BogusEdgeRemover
 
             return modelEdgesInDrawing;
         }
-
-
-        // private bool FaceIsNotHorizontalNorVertical(Face currentFace)
-        // {
-        //     double faceAngle = currentFace.Normal.GetAngleBetween(_globalAxisZ);
-        //
-        //     if (faceAngle < AngleEpsilon)
-        //         return false;
-        //
-        //     if (Math.Abs(faceAngle - Degrees90) < AngleEpsilon)
-        //         return false;
-        //
-        //     return !(faceAngle > Degrees180 - AngleEpsilon);
-        // }
 
         private static List<Face> GetFacesWithSimilarNormal(Face currentFace, FaceEnumerator faceEnumerator)
         {
@@ -975,7 +956,8 @@ namespace BogusEdgeRemover
 
             int count = commonVertexes.Count;
 
-            switch (count) {
+            switch (count)
+            {
                 case < 2:
                     return null;
                 case 2:
@@ -1088,8 +1070,8 @@ namespace BogusEdgeRemover
 
         #endregion
 
-        #region Pomocnicze (Drawing / cache)
-        
+        #region Pomocnicze – dopasowanie / cache linii modelu
+
         private static bool ModelEdgeIsPresentInList(
             LinePrimitive edge,
             List<LinePrimitive> list)
@@ -1108,7 +1090,7 @@ namespace BogusEdgeRemover
 
             return false;
         }
-        
+
         private static void SplitLinesInPrimitiveList(
             IList<PrimitiveBase> primitives,
             List<CachedLine> cachedLines,
@@ -1122,28 +1104,28 @@ namespace BogusEdgeRemover
                 switch (primitive)
                 {
                     case LinePrimitive linePrimitive:
-                        {
-                            var splitLines = SplitLinePrimitiveByIntersections(linePrimitive, cachedLines);
+                    {
+                        var splitLines = SplitLinePrimitiveByIntersections(linePrimitive, cachedLines);
 
-                            foreach (var splitLine in splitLines)
-                                output.Add(splitLine);
+                        foreach (var splitLine in splitLines)
+                            output.Add(splitLine);
 
-                            break;
-                        }
+                        break;
+                    }
 
                     case PrimitiveGroup group:
-                        {
-                            var newGroupPrimitives = new List<PrimitiveBase>(group.Primitives.Count);
+                    {
+                        var newGroupPrimitives = new List<PrimitiveBase>(group.Primitives.Count);
 
-                            SplitLinesInPrimitiveList(group.Primitives, cachedLines, newGroupPrimitives);
+                        SplitLinesInPrimitiveList(group.Primitives, cachedLines, newGroupPrimitives);
 
-                            group.Primitives.Clear();
-                            foreach (var p in newGroupPrimitives)
-                                group.Primitives.Add(p);
+                        group.Primitives.Clear();
+                        foreach (var p in newGroupPrimitives)
+                            group.Primitives.Add(p);
 
-                            output.Add(group);
-                            break;
-                        }
+                        output.Add(group);
+                        break;
+                    }
 
                     default:
                         output.Add(primitive);
@@ -1151,6 +1133,101 @@ namespace BogusEdgeRemover
                 }
             }
         }
+
+        private static TSD.Part GetDrawingPart(int drawingId)
+        {
+            var identifier = new TS.Identifier(drawingId);
+            var input = new TSP.DrawingPluginBase.InputDefinition(identifier, identifier);
+            return TSD.Tools.InputDefinitionFactory.GetDrawingObject(input) as TSD.Part;
+        }
+
+        private static List<CachedLine> BuildCachedLines(Segment presentation)
+        {
+            var cachedLines = new List<CachedLine>();
+
+            if (presentation?.Primitives == null)
+                return cachedLines;
+
+            foreach (var primitive in presentation.Primitives)
+            {
+                switch (primitive)
+                {
+                    case LinePrimitive lp:
+                        cachedLines.Add(new CachedLine(lp));
+                        break;
+
+                    case PrimitiveGroup g:
+                        CollectAllLinesFromGroup(g, cachedLines);
+                        break;
+                }
+            }
+
+            return cachedLines;
+        }
+
+        private static void CollectAllLinesFromGroup(PrimitiveGroup group, List<CachedLine> output)
+        {
+            if (group?.Primitives == null) return;
+
+            foreach (var p in group.Primitives)
+            {
+                switch (p)
+                {
+                    case LinePrimitive lp:
+                        output.Add(new CachedLine(lp));
+                        break;
+
+                    case PrimitiveGroup nested:
+                        CollectAllLinesFromGroup(nested, output);
+                        break;
+                }
+            }
+        }
+
+        private readonly struct CachedLine
+        {
+            public readonly LinePrimitive Primitive;
+            public readonly LineSegment Segment;
+
+            public CachedLine(LinePrimitive primitive)
+            {
+                Primitive = primitive;
+                Segment = new LineSegment(
+                    new Point(primitive.StartPoint.X, primitive.StartPoint.Y, 0),
+                    new Point(primitive.EndPoint.X,   primitive.EndPoint.Y,   0)
+                );
+            }
+        }
+
+        private readonly struct ModelEdgePair
+        {
+            public readonly LinePrimitive ModelEdgeInDrawing;
+            public readonly bool VisibleLine;
+
+            public ModelEdgePair(LinePrimitive modelEdgeInDrawing, bool visibleLine)
+            {
+                ModelEdgeInDrawing = modelEdgeInDrawing;
+                VisibleLine = visibleLine;
+            }
+        }
+
+        private struct LineIntersections
+        {
+            public bool Line01;
+            public bool Line05;
+            public bool Line09;
+
+            public LineIntersections(bool line01, bool line05, bool line09)
+            {
+                Line01 = line01;
+                Line05 = line05;
+                Line09 = line09;
+            }
+        }
+
+        #endregion
+
+        #region Graf linii – wykrywanie przekątnych
 
         private sealed class LineGraph
         {
@@ -1165,7 +1242,7 @@ namespace BogusEdgeRemover
                 Adjacency = adjacency;
             }
         }
-        
+
         private static LineGraph BuildLineGraph(List<CachedLine> cachedLines)
         {
             var nodes = new List<Point>();
@@ -1200,7 +1277,7 @@ namespace BogusEdgeRemover
                 return nodes.Count - 1;
             }
         }
-        
+
         private static bool IsDiagonalInGraph(LinePrimitive linePrimitive, LineGraph graph)
         {
             var pStart = new Point(linePrimitive.StartPoint.X, linePrimitive.StartPoint.Y, 0);
@@ -1260,97 +1337,6 @@ namespace BogusEdgeRemover
             }
 
             return false;
-        }
-
-        private static TSD.Part GetDrawingPart(int drawingId)
-        {
-            var identifier = new TS.Identifier(drawingId);
-            var input = new TSP.DrawingPluginBase.InputDefinition(identifier, identifier);
-            return TSD.Tools.InputDefinitionFactory.GetDrawingObject(input) as TSD.Part;
-        }
-
-        private static List<CachedLine> BuildCachedLines(Segment presentation)
-        {
-            var cachedLines = new List<CachedLine>();
-
-            if (presentation?.Primitives == null)
-                return cachedLines;
-
-            foreach (var primitive in presentation.Primitives)
-            {
-                switch (primitive)
-                {
-                    case LinePrimitive lp:
-                        cachedLines.Add(new CachedLine(lp));
-                        break;
-
-                    case PrimitiveGroup g:
-                        CollectAllLinesFromGroup(g, cachedLines);
-                        break;
-                }
-            }
-
-            return cachedLines;
-        }
-
-        private readonly struct CachedLine
-        {
-            public readonly LinePrimitive Primitive;
-            public readonly LineSegment Segment;
-
-            public CachedLine(LinePrimitive primitive)
-            {
-                Primitive = primitive;
-                Segment = new LineSegment(
-                    new Point(primitive.StartPoint.X, primitive.StartPoint.Y, 0),
-                    new Point(primitive.EndPoint.X,   primitive.EndPoint.Y,   0)
-                );
-            }
-        }
-
-        private static void CollectAllLinesFromGroup(PrimitiveGroup group, List<CachedLine> output)
-        {
-            if (group?.Primitives == null) return;
-
-            foreach (var p in group.Primitives)
-            {
-                switch (p)
-                {
-                    case LinePrimitive lp:
-                        output.Add(new CachedLine(lp));
-                        break;
-
-                    case PrimitiveGroup nested:
-                        CollectAllLinesFromGroup(nested, output);
-                        break;
-                }
-            }
-        }
-
-        private readonly struct ModelEdgePair
-        {
-            public readonly LinePrimitive ModelEdgeInDrawing;
-            public readonly bool VisibleLine;
-
-            public ModelEdgePair(LinePrimitive modelEdgeInDrawing, bool visibleLine)
-            {
-                ModelEdgeInDrawing = modelEdgeInDrawing;
-                VisibleLine = visibleLine;
-            }
-        }
-
-        private struct LineIntersections
-        {
-            public bool Line01;
-            public bool Line05;
-            public bool Line09;
-
-            public LineIntersections(bool line01, bool line05, bool line09)
-            {
-                Line01 = line01;
-                Line05 = line05;
-                Line09 = line09;
-            }
         }
 
         #endregion
