@@ -1271,6 +1271,9 @@ namespace BogusEdgeRemover
 
         private static bool IsDiagonalInGraph(LinePrimitive linePrimitive, LineGraph graph)
         {
+            if (graph == null)
+                return false;
+
             var pStart = new Point(linePrimitive.StartPoint.X, linePrimitive.StartPoint.Y, 0);
             var pEnd   = new Point(linePrimitive.EndPoint.X,   linePrimitive.EndPoint.Y,   0);
 
@@ -1283,7 +1286,7 @@ namespace BogusEdgeRemover
 
                 if (start == -1 && Distance.PointToPoint(n, pStart) <= DrawingEpsilon)
                     start = i;
-
+    
                 if (end == -1 && Distance.PointToPoint(n, pEnd) <= DrawingEpsilon)
                     end = i;
 
@@ -1298,7 +1301,7 @@ namespace BogusEdgeRemover
                 !graph.Adjacency.TryGetValue(end,   out var endNeighbors))
                 return false;
 
-            if (startNeighbors.Count < 3 || endNeighbors.Count < 3)
+            if (startNeighbors.Count < 2 || endNeighbors.Count < 2)
                 return false;
 
             var visited = new HashSet<int> { start };
