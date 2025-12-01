@@ -42,6 +42,7 @@ namespace BogusEdgeRemover
         private readonly TSM.Model _model = new();
 
         private double Scale { get; set; }
+        private bool IsUnfolded { get; set; }
         private Matrix TransformationMatrix { get; set; }
 
         #endregion
@@ -70,7 +71,7 @@ namespace BogusEdgeRemover
             Vector viewAxisY = view.ViewCoordinateSystem.AxisY;
             Vector viewAxisZ = viewAxisX.Cross(viewAxisY);
 
-            bool isUnfolded = view.Attributes is { UnfoldedView: true };
+            this.IsUnfolded = view.Attributes is { UnfoldedView: true };
 
             List<ModelEdgePair> edgesToDelete =
                 GetModelEdgesInDrawingToBeDeletedInDrawing(modelPart, viewAxisZ);
@@ -78,7 +79,7 @@ namespace BogusEdgeRemover
             List<LinePrimitive> modelEdgesToKeep =
                 GetModelEdgesInDrawingToKeep(modelPart);
 
-            RemoveBogusLines(presentation, edgesToDelete, modelEdgesToKeep, isUnfolded);
+            RemoveBogusLines(presentation, edgesToDelete, modelEdgesToKeep);
 
             return presentation;
         }
@@ -90,13 +91,12 @@ namespace BogusEdgeRemover
         private void RemoveBogusLines(
             Segment presentation,
             List<ModelEdgePair> modelEdgesToBeDeleted,
-            List<LinePrimitive> modelEdgesToKeep,
-            bool isUnfoldedView)
+            List<LinePrimitive> modelEdgesToKeep)
         {
             if (presentation?.Primitives == null || presentation.Primitives.Count == 0)
                 return;
 
-            if (isUnfoldedView)
+            if (this.IsUnfolded)
             {
                 var cachedLinesOriginal = BuildCachedLines(presentation);
 
@@ -125,7 +125,6 @@ namespace BogusEdgeRemover
                                     modelEdgesToKeep,
                                     cachedLines,
                                     graph,
-                                    true,
                                     ref removedHiddenLinesCount))
                             {
                                 newRootPrimitives.Add(linePrimitive);
@@ -142,7 +141,6 @@ namespace BogusEdgeRemover
                                 group,
                                 cachedLines,
                                 graph,
-                                true,
                                 ref removedHiddenLinesCount);
 
                             newRootPrimitives.Add(group);
@@ -183,7 +181,6 @@ namespace BogusEdgeRemover
                                     modelEdgesToKeep,
                                     cachedLinesNonUnfolded,
                                     null,
-                                    false,
                                     ref removedHiddenLinesCountNonUnfolded))
                             {
                                 newRootPrimitivesNonUnfolded.Add(splitLine);
@@ -201,7 +198,6 @@ namespace BogusEdgeRemover
                             group,
                             cachedLinesNonUnfolded,
                             null,
-                            false,
                             ref removedHiddenLinesCountNonUnfolded);
 
                         newRootPrimitivesNonUnfolded.Add(group);
@@ -225,7 +221,6 @@ namespace BogusEdgeRemover
             PrimitiveGroup primitiveGroup,
             List<CachedLine> cachedLines,
             LineGraph graph,
-            bool isUnfoldedView,
             ref int removedHiddenLinesCount)
         {
             if (primitiveGroup?.Primitives == null || primitiveGroup.Primitives.Count == 0)
@@ -239,7 +234,7 @@ namespace BogusEdgeRemover
                 {
                     case LinePrimitive linePrimitive:
                     {
-                        if (isUnfoldedView)
+                        if (this.IsUnfolded)
                         {
                             if (!ShouldDeleteLine(
                                     linePrimitive,
@@ -247,7 +242,6 @@ namespace BogusEdgeRemover
                                     modelEdgesToKeep,
                                     cachedLines,
                                     graph,
-                                    true,
                                     ref removedHiddenLinesCount))
                             {
                                 newPrimitives.Add(linePrimitive);
@@ -265,7 +259,6 @@ namespace BogusEdgeRemover
                                         modelEdgesToKeep,
                                         cachedLines,
                                         graph,
-                                        false,
                                         ref removedHiddenLinesCount))
                                 {
                                     newPrimitives.Add(splitLine);
@@ -284,7 +277,6 @@ namespace BogusEdgeRemover
                             nestedGroup,
                             cachedLines,
                             graph,
-                            isUnfoldedView,
                             ref removedHiddenLinesCount);
 
                         newPrimitives.Add(nestedGroup);
@@ -308,12 +300,11 @@ namespace BogusEdgeRemover
             List<LinePrimitive> modelEdgesToKeep,
             List<CachedLine> cachedLines,
             LineGraph graph,
-            bool isUnfoldedView,
             ref int removedHiddenLinesCount)
         {
             bool isInternal = LinePrimitiveIsNotExternal(linePrimitive, cachedLines);
 
-            if (isUnfoldedView)
+            if (this.IsUnfolded)
             {
                 bool overlapsDeleteEdge = false;
                 if (modelEdgesToBeDeleted is { Count: > 0 })
