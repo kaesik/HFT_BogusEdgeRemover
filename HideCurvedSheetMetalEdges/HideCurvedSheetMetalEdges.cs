@@ -3,7 +3,7 @@ using TSM = Tekla.Structures.Model;
 using TSD = Tekla.Structures.Drawing;
 using TSP = Tekla.Structures.Plugins;
 
-namespace BogusEdgeRemover
+namespace HideCurvedSheetMetalEdges
 {
     using System;
     using System.Collections.Generic;
@@ -24,12 +24,13 @@ namespace BogusEdgeRemover
         CustomPresentationObjectTypesEnum.Pours,
         CustomPresentationObjectTypesEnum.Parts
     })]
-    [ExportMetadata("BriefDescription", "TriangulationSmoother")]
-    [ExportMetadata("Description", "Plugin that cleans and smooths mesh triangulation by removing artificial edges created by non-planar surfaces")]
-    [ExportMetadata("GUID", "00CE0BCD-429B-48AC-A235-DC14311204D4")]
+    [ExportMetadata("BriefDescription", "Kanten von gebogenen Blechen ausblenden")]
+    [ExportMetadata("Description", "Kanten von gebogenen Blechen werden ausgeblendet.")]
+    [ExportMetadata("GUID", "00CE0BCD-429B-48AC-A235-DC14311204D4")]   
 
     #endregion
-    public class BogusEdgeRemover : IDrawingPresentationPlugin
+    
+    public class HideCurvedSheetMetalEdges : IDrawingPresentationPlugin
     {
         #region Stałe / pola
 

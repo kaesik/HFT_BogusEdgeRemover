@@ -3,7 +3,7 @@
     <TargetFramework>net48</TargetFramework>
 	  <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AssemblyTitle>BogusEdgeRemover</AssemblyTitle>
-    <Product>BogusEdgeRemover</Product>
+    <Product>HideCurvedSheetMetalEdges</Product>
     <Copyright>Copyright ©  Trimble 2023</Copyright>
     <OutputPath>..\Installer\BuildDrop\</OutputPath>
 	<OutputType>Library</OutputType>
@@ -11,7 +11,7 @@
 	<UseWpf>true</UseWpf>
 	<BaseOutputPath></BaseOutputPath>
   <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-  <RootNamespace>BogusEdgeRemover</RootNamespace>
+  <RootNamespace>HideCurvedSheetMetalEdges</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.ComponentModel.Composition" Version="10.0.0" />
