@@ -22,25 +22,25 @@ namespace HideCurvedSheetMetalEdges
             var modelEdgesInDrawing = new List<ModelEdgePair>();
 
             TSM.Solid solid = selectedModelPart.GetSolid();
-            FaceEnumerator faceEnum = solid.GetFaceEnumerator();
+            var faces = GetSolidFacesWithCachedVertexes(solid, viewAxisZ);
 
-            while (faceEnum.MoveNext())
+            for (int i = 0; i < faces.Count; i++)
             {
-                if (faceEnum.Current is not { } currentFace)
-                    continue;
+                var currentFace = faces[i];
 
-                var facesWithSimilarNormal = GetFacesWithSimilarNormal(currentFace, solid.GetFaceEnumerator());
-
-                foreach (Face faceWithSimilarNormal in facesWithSimilarNormal)
+                for (int j = i + 1; j < faces.Count; j++)
                 {
-                    LineSegment commonEdge = GetCommonEdge(currentFace, faceWithSimilarNormal);
-                    if (commonEdge == null)
+                    var faceWithSimilarNormal = faces[j];
+
+                    double normalAngle = currentFace.Normal.GetAngleBetween(faceWithSimilarNormal.Normal);
+                    if (normalAngle > BigAngleAllowance)
                         continue;
 
-                    double dot1 = Vector.Dot(currentFace.Normal,           viewAxisZ);
-                    double dot2 = Vector.Dot(faceWithSimilarNormal.Normal, viewAxisZ);
+                    if (currentFace.DotViewAxisZ * faceWithSimilarNormal.DotViewAxisZ < 0)
+                        continue;
 
-                    if (dot1 * dot2 < 0)
+                    LineSegment commonEdge = GetCommonEdge(currentFace.Vertexes, faceWithSimilarNormal.Vertexes);
+                    if (commonEdge == null)
                         continue;
 
                     Point transformedStartPoint = TransformationMatrix.Transform(commonEdge.StartPoint);
@@ -65,6 +65,30 @@ namespace HideCurvedSheetMetalEdges
             return modelEdgesInDrawing;
         }
 
+        private static List<SolidFaceCache> GetSolidFacesWithCachedVertexes(TSM.Solid solid, Vector viewAxisZ)
+        {
+            var faces = new List<SolidFaceCache>();
+            FaceEnumerator faceEnum = solid.GetFaceEnumerator();
+
+            while (faceEnum.MoveNext())
+            {
+                if (faceEnum.Current is not { } face)
+                    continue;
+
+                var vertexes = GetFaceVertexes(face);
+                if (vertexes.Count < 2)
+                    continue;
+
+                faces.Add(new SolidFaceCache(
+                    face.Normal,
+                    vertexes,
+                    Vector.Dot(face.Normal, viewAxisZ)));
+            }
+
+            return faces;
+        }
+
+
         private static List<Face> GetFacesWithSimilarNormal(Face currentFace, FaceEnumerator faceEnumerator)
         {
             var facesWithSimilarNormal = new List<Face>();
@@ -87,10 +111,14 @@ namespace HideCurvedSheetMetalEdges
 
         private static LineSegment GetCommonEdge(Face currentFace, Face faceWithSimilarNormal)
         {
-            var commonVertexes = new List<Point>();
+            return GetCommonEdge(GetFaceVertexes(currentFace), GetFaceVertexes(faceWithSimilarNormal));
+        }
 
-            var currentFaceVertexes   = GetFaceVertexes(currentFace);
-            var similarNormalVertexes = GetFaceVertexes(faceWithSimilarNormal);
+        private static LineSegment GetCommonEdge(
+            List<Point> currentFaceVertexes,
+            List<Point> similarNormalVertexes)
+        {
+            var commonVertexes = new List<Point>();
 
             foreach (Point currentVertex in currentFaceVertexes)
             {
@@ -199,6 +227,20 @@ namespace HideCurvedSheetMetalEdges
             }
 
             return faceVertexes;
+        }
+
+        private readonly struct SolidFaceCache
+        {
+            public readonly Vector Normal;
+            public readonly List<Point> Vertexes;
+            public readonly double DotViewAxisZ;
+
+            public SolidFaceCache(Vector normal, List<Point> vertexes, double dotViewAxisZ)
+            {
+                Normal = normal;
+                Vertexes = vertexes;
+                DotViewAxisZ = dotViewAxisZ;
+            }
         }
 
         private static bool CommonEdgeIsPresentInModelEdges(

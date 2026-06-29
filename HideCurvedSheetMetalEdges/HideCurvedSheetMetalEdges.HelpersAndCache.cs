@@ -83,6 +83,41 @@ namespace HideCurvedSheetMetalEdges
             return TSD.Tools.InputDefinitionFactory.GetDrawingObject(input) as TSD.Part;
         }
 
+        private static bool SegmentBoundingBoxesOverlap(LineSegment a, LineSegment b, double tolerance)
+        {
+            double aMinX = System.Math.Min(a.Point1.X, a.Point2.X) - tolerance;
+            double aMaxX = System.Math.Max(a.Point1.X, a.Point2.X) + tolerance;
+            double aMinY = System.Math.Min(a.Point1.Y, a.Point2.Y) - tolerance;
+            double aMaxY = System.Math.Max(a.Point1.Y, a.Point2.Y) + tolerance;
+
+            double bMinX = System.Math.Min(b.Point1.X, b.Point2.X) - tolerance;
+            double bMaxX = System.Math.Max(b.Point1.X, b.Point2.X) + tolerance;
+            double bMinY = System.Math.Min(b.Point1.Y, b.Point2.Y) - tolerance;
+            double bMaxY = System.Math.Max(b.Point1.Y, b.Point2.Y) + tolerance;
+
+            return aMinX <= bMaxX && aMaxX >= bMinX &&
+                   aMinY <= bMaxY && aMaxY >= bMinY;
+        }
+
+        private static bool LinePrimitiveBoundingBoxesOverlap(
+            LinePrimitive a,
+            LinePrimitive b,
+            double tolerance)
+        {
+            double aMinX = System.Math.Min(a.StartPoint.X, a.EndPoint.X) - tolerance;
+            double aMaxX = System.Math.Max(a.StartPoint.X, a.EndPoint.X) + tolerance;
+            double aMinY = System.Math.Min(a.StartPoint.Y, a.EndPoint.Y) - tolerance;
+            double aMaxY = System.Math.Max(a.StartPoint.Y, a.EndPoint.Y) + tolerance;
+
+            double bMinX = System.Math.Min(b.StartPoint.X, b.EndPoint.X) - tolerance;
+            double bMaxX = System.Math.Max(b.StartPoint.X, b.EndPoint.X) + tolerance;
+            double bMinY = System.Math.Min(b.StartPoint.Y, b.EndPoint.Y) - tolerance;
+            double bMaxY = System.Math.Max(b.StartPoint.Y, b.EndPoint.Y) + tolerance;
+
+            return aMinX <= bMaxX && aMaxX >= bMinX &&
+                   aMinY <= bMaxY && aMaxY >= bMinY;
+        }
+
         private static List<CachedLine> BuildCachedLines(Segment presentation)
         {
             var cachedLines = new List<CachedLine>();

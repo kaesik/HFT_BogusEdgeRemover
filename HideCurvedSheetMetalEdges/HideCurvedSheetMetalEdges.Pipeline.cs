@@ -224,8 +224,6 @@ namespace HideCurvedSheetMetalEdges
             LineGraph graph,
             ref int removedHiddenLinesCount)
         {
-            bool isInternal = LinePrimitiveIsNotExternal(linePrimitive, cachedLines);
-
             if (this.IsUnfolded)
             {
                 bool overlapsDeleteEdge = false;
@@ -246,24 +244,33 @@ namespace HideCurvedSheetMetalEdges
                 {
                     foreach (var keepEdge in modelEdgesToKeep)
                     {
-                        if (LinePrimitiveOverlapsWithModelEdge(linePrimitive, keepEdge))
-                        {
-                            overlapsKeepEdge = true;
-                            break;
-                        }
+                        if (!LinePrimitiveOverlapsWithModelEdge(linePrimitive, keepEdge))
+                            continue;
+
+                        overlapsKeepEdge = true;
+                        break;
                     }
                 }
 
-                if (overlapsDeleteEdge && isInternal)
+                bool? isInternal = null;
+
+                if (overlapsDeleteEdge)
                 {
-                    removedHiddenLinesCount++;
-                    return true;
+                    isInternal = LinePrimitiveIsNotExternal(linePrimitive, cachedLines);
+                    if (isInternal.Value)
+                    {
+                        removedHiddenLinesCount++;
+                        return true;
+                    }
                 }
 
                 if (overlapsKeepEdge)
                     return false;
 
-                if (!isInternal)
+                if (!isInternal.HasValue)
+                    isInternal = LinePrimitiveIsNotExternal(linePrimitive, cachedLines);
+
+                if (!isInternal.Value)
                     return false;
 
                 if (graph != null && IsDiagonalInGraph(linePrimitive, graph))
@@ -275,9 +282,6 @@ namespace HideCurvedSheetMetalEdges
                 return false;
             }
 
-            if (!isInternal)
-                return false;
-
             if (modelEdgesToBeDeleted == null || modelEdgesToBeDeleted.Count == 0)
                 return false;
 
@@ -285,6 +289,9 @@ namespace HideCurvedSheetMetalEdges
             {
                 if (!LinePrimitiveOverlapsWithEdgeToBeDeleted(linePrimitive, modelEdge))
                     continue;
+
+                if (!LinePrimitiveIsNotExternal(linePrimitive, cachedLines))
+                    return false;
 
                 removedHiddenLinesCount++;
                 return true;

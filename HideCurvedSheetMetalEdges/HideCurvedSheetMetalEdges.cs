@@ -71,8 +71,9 @@ namespace HideCurvedSheetMetalEdges
             List<ModelEdgePair> edgesToDelete =
                 GetModelEdgesInDrawingToBeDeletedInDrawing(modelPart, viewAxisZ);
 
-            List<LinePrimitive> modelEdgesToKeep =
-                GetModelEdgesInDrawingToKeep(modelPart);
+            List<LinePrimitive> modelEdgesToKeep = this.IsUnfolded
+                ? GetModelEdgesInDrawingToKeep(modelPart)
+                : new List<LinePrimitive>();
 
             RemoveBogusLines(presentation, edgesToDelete, modelEdgesToKeep);
 

@@ -34,6 +34,9 @@ namespace HideCurvedSheetMetalEdges
                 if (AreSameLinePrimitives(cl.Primitive, baseLine))
                     continue;
 
+                if (!SegmentBoundingBoxesOverlap(baseSeg, cl.Segment, DrawingEpsilon))
+                    continue;
+
                 cutters.Add(cl.Segment);
             }
 

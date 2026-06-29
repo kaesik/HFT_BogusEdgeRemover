@@ -79,6 +79,9 @@ namespace HideCurvedSheetMetalEdges
         {
             var edge = modelEdgeToBeDeleted.ModelEdgeInDrawing;
 
+            if (!LinePrimitiveBoundingBoxesOverlap(linePrimitive, edge, DrawingEpsilon))
+                return false;
+
             Line edgeLine = new(
                 new Point(edge.StartPoint.X, edge.StartPoint.Y),
                 new Point(edge.EndPoint.X,   edge.EndPoint.Y));
@@ -123,6 +126,9 @@ namespace HideCurvedSheetMetalEdges
             LinePrimitive linePrimitive,
             LinePrimitive modelEdge)
         {
+            if (!LinePrimitiveBoundingBoxesOverlap(linePrimitive, modelEdge, DrawingEpsilon))
+                return false;
+
             Line edgeLine = new(
                 new Point(modelEdge.StartPoint.X, modelEdge.StartPoint.Y),
                 new Point(modelEdge.EndPoint.X,   modelEdge.EndPoint.Y));

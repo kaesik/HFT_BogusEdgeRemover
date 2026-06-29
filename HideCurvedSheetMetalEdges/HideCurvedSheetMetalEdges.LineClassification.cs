@@ -39,6 +39,9 @@ namespace HideCurvedSheetMetalEdges
                     current,
                     null,
                     ref top, ref bottom, ref right, ref left);
+
+                if (SideOk(top) && SideOk(bottom) && SideOk(right) && SideOk(left))
+                    return true;
             }
 
             return SideOk(top) && SideOk(bottom) && SideOk(right) && SideOk(left);
