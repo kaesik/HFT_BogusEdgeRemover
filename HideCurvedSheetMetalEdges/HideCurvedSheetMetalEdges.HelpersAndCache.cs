@@ -14,6 +14,31 @@ namespace HideCurvedSheetMetalEdges
     {
         #region Pomocnicze – dopasowanie / cache linii modelu
 
+        private static bool PresentationContainsLine(Segment presentation)
+        {
+            return presentation?.Primitives != null && PrimitiveListContainsLine(presentation.Primitives);
+        }
+
+        private static bool PrimitiveListContainsLine(IList<PrimitiveBase> primitives)
+        {
+            if (primitives == null || primitives.Count == 0)
+                return false;
+
+            foreach (var primitive in primitives)
+            {
+                switch (primitive)
+                {
+                    case LinePrimitive:
+                        return true;
+
+                    case PrimitiveGroup group when PrimitiveListContainsLine(group.Primitives):
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
         private static bool ModelEdgeIsPresentInList(
             LinePrimitive edge,
             List<LinePrimitive> list)

@@ -93,6 +93,12 @@ namespace HideCurvedSheetMetalEdges
                 {
                     case LinePrimitive linePrimitive:
                     {
+                        if (!LinePrimitiveCanOverlapAnyEdgeToBeDeleted(linePrimitive, modelEdgesToBeDeleted))
+                        {
+                            newRootPrimitivesNonUnfolded.Add(linePrimitive);
+                            break;
+                        }
+
                         var splitLines = SplitLinePrimitiveByIntersections(linePrimitive, cachedLinesNonUnfolded);
 
                         foreach (var splitLine in splitLines)
@@ -171,6 +177,12 @@ namespace HideCurvedSheetMetalEdges
                         }
                         else
                         {
+                            if (!LinePrimitiveCanOverlapAnyEdgeToBeDeleted(linePrimitive, modelEdgesToBeDeleted))
+                            {
+                                newPrimitives.Add(linePrimitive);
+                                break;
+                            }
+
                             var splitLines = SplitLinePrimitiveByIntersections(linePrimitive, cachedLines);
 
                             foreach (var splitLine in splitLines)

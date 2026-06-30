@@ -49,6 +49,9 @@ namespace HideCurvedSheetMetalEdges
             if (presentation == null)
                 return null;
 
+            if (!PresentationContainsLine(presentation))
+                return presentation;
+
             var drawingPart = GetDrawingPart(presentation.Id);
             if (drawingPart == null)
                 return presentation;

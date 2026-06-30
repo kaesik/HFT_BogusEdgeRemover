@@ -40,7 +40,17 @@ namespace HideCurvedSheetMetalEdges
                 cutters.Add(cl.Segment);
             }
 
+            if (cutters.Count == 0)
+                return new List<LinePrimitive> { baseLine };
+
             var splitSegs = SplitLineByIntersections(baseSeg, cutters);
+
+            if (splitSegs.Count == 1 &&
+                Distance.PointToPoint(splitSegs[0].Point1, baseSeg.Point1) <= DrawingEpsilon &&
+                Distance.PointToPoint(splitSegs[0].Point2, baseSeg.Point2) <= DrawingEpsilon)
+            {
+                return new List<LinePrimitive> { baseLine };
+            }
 
             var result = new List<LinePrimitive>(splitSegs.Count);
             foreach (var s in splitSegs)
