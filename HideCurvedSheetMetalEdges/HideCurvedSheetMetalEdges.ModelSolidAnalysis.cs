@@ -17,57 +17,103 @@ namespace HideCurvedSheetMetalEdges
 
         private List<ModelEdgePair> GetModelEdgesInDrawingToBeDeletedInDrawing(
             TSM.Part selectedModelPart,
-            Vector viewAxisZ)
+            Vector viewAxisZ,
+            bool curvedSectionView)
         {
             var modelEdgesInDrawing = new List<ModelEdgePair>();
+            SolidAnalysisCacheEntry solidCache = GetOrBuildSolidAnalysisCache(selectedModelPart);
 
-            TSM.Solid solid = selectedModelPart.GetSolid();
-            var faces = GetSolidFacesWithCachedVertexes(solid, viewAxisZ);
-
-            for (int i = 0; i < faces.Count; i++)
+            foreach (var candidate in solidCache.CandidateEdgesToDelete)
             {
-                var currentFace = faces[i];
+                double firstDotViewAxisZ = Vector.Dot(candidate.FirstFaceNormal, viewAxisZ);
+                double secondDotViewAxisZ = Vector.Dot(candidate.SecondFaceNormal, viewAxisZ);
 
-                for (int j = i + 1; j < faces.Count; j++)
+                if (!curvedSectionView &&
+                    firstDotViewAxisZ * secondDotViewAxisZ < 0)
                 {
-                    var faceWithSimilarNormal = faces[j];
+                    continue;
+                }
 
-                    double normalAngle = currentFace.Normal.GetAngleBetween(faceWithSimilarNormal.Normal);
-                    if (normalAngle > BigAngleAllowance)
+                bool visibleLine =
+                    candidate.MiddleNormal.GetAngleBetween(viewAxisZ) <
+                    Degrees90 + SmallAngleAllowance;
+
+                List<LinePrimitive> projectedEdges =
+                    ProjectModelEdgeToPresentation(candidate.Edge);
+
+                foreach (LinePrimitive commonEdgeInDrawing in projectedEdges)
+                {
+                    if (CommonEdgeIsPresentInModelEdges(
+                            commonEdgeInDrawing,
+                            visibleLine,
+                            modelEdgesInDrawing))
+                    {
                         continue;
+                    }
 
-                    if (currentFace.DotViewAxisZ * faceWithSimilarNormal.DotViewAxisZ < 0)
-                        continue;
-
-                    LineSegment commonEdge = GetCommonEdge(currentFace.Vertexes, faceWithSimilarNormal.Vertexes);
-                    if (commonEdge == null)
-                        continue;
-
-                    Point transformedStartPoint = TransformationMatrix.Transform(commonEdge.StartPoint);
-                    Point transformedEndPoint   = TransformationMatrix.Transform(commonEdge.EndPoint);
-
-                    var commonEdgeInDrawing = new LinePrimitive(
-                        new Vector2(transformedStartPoint.X / Scale, transformedStartPoint.Y / Scale),
-                        new Vector2(transformedEndPoint.X   / Scale, transformedEndPoint.Y   / Scale));
-
-                    Vector middleNormal = new(
-                        (currentFace.Normal.X + faceWithSimilarNormal.Normal.X) / 2.0,
-                        (currentFace.Normal.Y + faceWithSimilarNormal.Normal.Y) / 2.0,
-                        (currentFace.Normal.Z + faceWithSimilarNormal.Normal.Z) / 2.0);
-
-                    bool visibleLine = middleNormal.GetAngleBetween(viewAxisZ) < Degrees90 + SmallAngleAllowance;
-
-                    if (!CommonEdgeIsPresentInModelEdges(commonEdgeInDrawing, visibleLine, modelEdgesInDrawing))
-                        modelEdgesInDrawing.Add(new ModelEdgePair(commonEdgeInDrawing, visibleLine));
+                    modelEdgesInDrawing.Add(
+                        new ModelEdgePair(commonEdgeInDrawing, visibleLine));
                 }
             }
 
             return modelEdgesInDrawing;
         }
 
-        private static List<SolidFaceCache> GetSolidFacesWithCachedVertexes(TSM.Solid solid, Vector viewAxisZ)
+        private static SolidAnalysisCacheEntry BuildSolidAnalysisCacheEntry(TSM.Part selectedModelPart)
+        {
+            TSM.Solid solid = selectedModelPart.GetSolid();
+
+            List<SolidFaceCache> faces =
+                GetSolidFacesWithCachedVertexes(solid, out var allModelEdges);
+
+            var candidateEdgesToDelete = new List<ModelEdgeCandidate>();
+
+            for (int i = 0; i < faces.Count; i++)
+            {
+                SolidFaceCache currentFace = faces[i];
+
+                for (int j = i + 1; j < faces.Count; j++)
+                {
+                    SolidFaceCache faceWithSimilarNormal = faces[j];
+
+                    double normalAngle =
+                        currentFace.Normal.GetAngleBetween(faceWithSimilarNormal.Normal);
+
+                    if (normalAngle > BigAngleAllowance)
+                        continue;
+
+                    LineSegment commonEdge = GetCommonEdge(
+                        currentFace.Vertexes,
+                        faceWithSimilarNormal.Vertexes);
+
+                    if (commonEdge == null)
+                        continue;
+
+                    var middleNormal = new Vector(
+                        (currentFace.Normal.X + faceWithSimilarNormal.Normal.X) / 2.0,
+                        (currentFace.Normal.Y + faceWithSimilarNormal.Normal.Y) / 2.0,
+                        (currentFace.Normal.Z + faceWithSimilarNormal.Normal.Z) / 2.0);
+
+                    candidateEdgesToDelete.Add(new ModelEdgeCandidate(
+                        commonEdge,
+                        currentFace.Normal,
+                        faceWithSimilarNormal.Normal,
+                        middleNormal));
+                }
+            }
+
+            return new SolidAnalysisCacheEntry(
+                candidateEdgesToDelete,
+                allModelEdges);
+        }
+
+        private static List<SolidFaceCache> GetSolidFacesWithCachedVertexes(
+            TSM.Solid solid,
+            out List<LineSegment> allModelEdges)
         {
             var faces = new List<SolidFaceCache>();
+            allModelEdges = new List<LineSegment>();
+
             FaceEnumerator faceEnum = solid.GetFaceEnumerator();
 
             while (faceEnum.MoveNext())
@@ -75,21 +121,57 @@ namespace HideCurvedSheetMetalEdges
                 if (faceEnum.Current is not { } face)
                     continue;
 
-                var vertexes = GetFaceVertexes(face);
-                if (vertexes.Count < 2)
+                var faceVertexes = new List<Point>();
+                LoopEnumerator loopEnum = face.GetLoopEnumerator();
+
+                while (loopEnum.MoveNext())
+                {
+                    if (loopEnum.Current is not { } loop)
+                        continue;
+
+                    var loopVertexes = new List<Point>();
+                    VertexEnumerator vertexEnum = loop.GetVertexEnumerator();
+
+                    while (vertexEnum.MoveNext())
+                    {
+                        Point vertex = vertexEnum.Current;
+                        if (vertex == null)
+                            continue;
+
+                        loopVertexes.Add(vertex);
+                        faceVertexes.Add(vertex);
+                    }
+
+                    int loopVertexCount = loopVertexes.Count;
+                    if (loopVertexCount < 2)
+                        continue;
+
+                    for (int i = 0; i < loopVertexCount; i++)
+                    {
+                        Point p0 = loopVertexes[i];
+                        Point p1 = loopVertexes[(i + 1) % loopVertexCount];
+
+                        if (Distance.PointToPoint(p0, p1) < ModelEpsilon * 0.5)
+                            continue;
+
+                        allModelEdges.Add(new LineSegment(p0, p1));
+                    }
+                }
+
+                if (faceVertexes.Count < 2)
                     continue;
 
                 faces.Add(new SolidFaceCache(
-                    face.Normal,
-                    vertexes,
-                    Vector.Dot(face.Normal, viewAxisZ)));
+                    new Vector(face.Normal),
+                    faceVertexes));
             }
 
             return faces;
         }
 
-
-        private static List<Face> GetFacesWithSimilarNormal(Face currentFace, FaceEnumerator faceEnumerator)
+        private static List<Face> GetFacesWithSimilarNormal(
+            Face currentFace,
+            FaceEnumerator faceEnumerator)
         {
             var facesWithSimilarNormal = new List<Face>();
 
@@ -111,7 +193,9 @@ namespace HideCurvedSheetMetalEdges
 
         private static LineSegment GetCommonEdge(Face currentFace, Face faceWithSimilarNormal)
         {
-            return GetCommonEdge(GetFaceVertexes(currentFace), GetFaceVertexes(faceWithSimilarNormal));
+            return GetCommonEdge(
+                GetFaceVertexes(currentFace),
+                GetFaceVertexes(faceWithSimilarNormal));
         }
 
         private static LineSegment GetCommonEdge(
@@ -173,7 +257,9 @@ namespace HideCurvedSheetMetalEdges
             dir.Normalize();
 
             double minT = 0.0;
-            double maxT = Vector.Dot(new Vector(p1.X - p0.X, p1.Y - p0.Y, p1.Z - p0.Z), dir);
+            double maxT = Vector.Dot(
+                new Vector(p1.X - p0.X, p1.Y - p0.Y, p1.Z - p0.Z),
+                dir);
 
             foreach (var p in commonVertexes)
             {
@@ -204,7 +290,9 @@ namespace HideCurvedSheetMetalEdges
                 p0.Y + dir.Y * maxT,
                 p0.Z + dir.Z * maxT);
 
-            return Distance.PointToPoint(start, end) < DrawingEpsilon ? null : new LineSegment(start, end);
+            return Distance.PointToPoint(start, end) < DrawingEpsilon
+                ? null
+                : new LineSegment(start, end);
         }
 
         private static List<Point> GetFaceVertexes(Face currentFace)
@@ -233,13 +321,11 @@ namespace HideCurvedSheetMetalEdges
         {
             public readonly Vector Normal;
             public readonly List<Point> Vertexes;
-            public readonly double DotViewAxisZ;
 
-            public SolidFaceCache(Vector normal, List<Point> vertexes, double dotViewAxisZ)
+            public SolidFaceCache(Vector normal, List<Point> vertexes)
             {
                 Normal = normal;
                 Vertexes = vertexes;
-                DotViewAxisZ = dotViewAxisZ;
             }
         }
 
@@ -252,7 +338,7 @@ namespace HideCurvedSheetMetalEdges
             {
                 bool sameEndPoints =
                     (commonEdgeInDrawing.StartPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.StartPoint) < DrawingEpsilon &&
-                     commonEdgeInDrawing.EndPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.EndPoint)   < DrawingEpsilon)
+                     commonEdgeInDrawing.EndPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.EndPoint)     < DrawingEpsilon)
                     || (commonEdgeInDrawing.StartPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.EndPoint) < DrawingEpsilon &&
                         commonEdgeInDrawing.EndPoint.DistanceTo(modelEdge.ModelEdgeInDrawing.StartPoint) < DrawingEpsilon);
 

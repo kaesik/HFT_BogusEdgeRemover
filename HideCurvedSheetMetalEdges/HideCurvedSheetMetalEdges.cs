@@ -38,7 +38,14 @@ namespace HideCurvedSheetMetalEdges
 
         private double Scale { get; set; }
         private bool IsUnfolded { get; set; }
+        private bool IsCurvedSectionView { get; set; }
         private Matrix TransformationMatrix { get; set; }
+        private Matrix CurvedSourceTransformationMatrix { get; set; }
+        private TSD.View CurrentView { get; set; }
+        private TSD.View CurvedSourceView { get; set; }
+
+        private bool UseTopologyPipeline =>
+            this.IsUnfolded || this.IsCurvedSectionView;
 
         #endregion
 
@@ -62,17 +69,21 @@ namespace HideCurvedSheetMetalEdges
             if (drawingPart.GetView() is not TSD.View view)
                 return presentation;
 
-            Scale = view.Attributes.Scale;
-            TransformationMatrix = MatrixFactory.ToCoordinateSystem(view.DisplayCoordinateSystem);
+            ConfigureViewProjection(view);
 
-            Vector viewAxisX = view.ViewCoordinateSystem.AxisX;
-            Vector viewAxisY = view.ViewCoordinateSystem.AxisY;
+            TSD.View directionView = this.IsCurvedSectionView && this.CurvedSourceView != null
+                ? this.CurvedSourceView
+                : view;
+
+            Vector viewAxisX = directionView.ViewCoordinateSystem.AxisX;
+            Vector viewAxisY = directionView.ViewCoordinateSystem.AxisY;
             Vector viewAxisZ = viewAxisX.Cross(viewAxisY);
 
-            this.IsUnfolded = view.Attributes is { UnfoldedView: true };
-
             List<ModelEdgePair> edgesToDelete =
-                GetModelEdgesInDrawingToBeDeletedInDrawing(modelPart, viewAxisZ);
+                GetModelEdgesInDrawingToBeDeletedInDrawing(
+                    modelPart,
+                    viewAxisZ,
+                    this.IsCurvedSectionView);
 
             List<LinePrimitive> modelEdgesToKeep = this.IsUnfolded
                 ? GetModelEdgesInDrawingToKeep(modelPart)

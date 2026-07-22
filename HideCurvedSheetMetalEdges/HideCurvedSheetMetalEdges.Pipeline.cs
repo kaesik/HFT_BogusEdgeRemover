@@ -18,7 +18,7 @@ namespace HideCurvedSheetMetalEdges
             if (presentation?.Primitives == null || presentation.Primitives.Count == 0)
                 return;
 
-            if (this.IsUnfolded)
+            if (this.UseTopologyPipeline)
             {
                 var cachedLinesOriginal = BuildCachedLines(presentation);
 
@@ -162,7 +162,7 @@ namespace HideCurvedSheetMetalEdges
                 {
                     case LinePrimitive linePrimitive:
                     {
-                        if (this.IsUnfolded)
+                        if (this.UseTopologyPipeline)
                         {
                             if (!ShouldDeleteLine(
                                     linePrimitive,
@@ -236,7 +236,7 @@ namespace HideCurvedSheetMetalEdges
             LineGraph graph,
             ref int removedHiddenLinesCount)
         {
-            if (this.IsUnfolded)
+            if (this.UseTopologyPipeline)
             {
                 bool overlapsDeleteEdge = false;
                 if (modelEdgesToBeDeleted is { Count: > 0 })

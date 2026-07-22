@@ -19,54 +19,17 @@ namespace HideCurvedSheetMetalEdges
             TSM.Part selectedModelPart)
         {
             var modelEdgesInDrawing = new List<LinePrimitive>();
+            SolidAnalysisCacheEntry solidCache = GetOrBuildSolidAnalysisCache(selectedModelPart);
 
-            TSM.Solid solid = selectedModelPart.GetSolid();
-            FaceEnumerator faceEnum = solid.GetFaceEnumerator();
-
-            while (faceEnum.MoveNext())
+            foreach (LineSegment modelEdge in solidCache.AllModelEdges)
             {
-                if (faceEnum.Current is not { } currentFace)
-                    continue;
+                List<LinePrimitive> projectedEdges =
+                    ProjectModelEdgeToPresentation(modelEdge);
 
-                LoopEnumerator loopEnum = currentFace.GetLoopEnumerator();
-
-                while (loopEnum.MoveNext())
+                foreach (LinePrimitive edgeInDrawing in projectedEdges)
                 {
-                    if (loopEnum.Current is not { } loop)
-                        continue;
-
-                    var vertices = new List<Point>();
-                    VertexEnumerator vertexEnum = loop.GetVertexEnumerator();
-
-                    while (vertexEnum.MoveNext())
-                    {
-                        Point vertex = vertexEnum.Current;
-                        if (vertex != null)
-                            vertices.Add(vertex);
-                    }
-
-                    int count = vertices.Count;
-                    if (count < 2)
-                        continue;
-
-                    for (int i = 0; i < count; i++)
-                    {
-                        Point p0 = vertices[i];
-                        Point p1 = vertices[(i + 1) % count];
-
-                        if (Distance.PointToPoint(p0, p1) < ModelEpsilon * 0.5)
-                            continue;
-
-                        Point t0 = TransformationMatrix.Transform(p0);
-                        Point t1 = TransformationMatrix.Transform(p1);
-
-                        var edgeInDrawing = new LinePrimitive(
-                            new Vector2(t0.X / Scale, t0.Y / Scale),
-                            new Vector2(t1.X / Scale, t1.Y / Scale));
-
-                        if (!ModelEdgeIsPresentInList(edgeInDrawing, modelEdgesInDrawing))
-                            modelEdgesInDrawing.Add(edgeInDrawing);
-                    }
+                    if (!ModelEdgeIsPresentInList(edgeInDrawing, modelEdgesInDrawing))
+                        modelEdgesInDrawing.Add(edgeInDrawing);
                 }
             }
 
