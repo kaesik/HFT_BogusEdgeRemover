@@ -55,17 +55,19 @@ namespace HideCurvedSheetMetalEdges
             return false;
         }
 
-        private static bool ModelEdgeIsPresentInList(
+        private bool ModelEdgeIsPresentInList(
             LinePrimitive edge,
             List<LinePrimitive> list)
         {
+            double tolerance = this.ActiveDrawingEpsilon;
+
             foreach (var e in list)
             {
                 bool sameEndPoints =
-                    (edge.StartPoint.DistanceTo(e.StartPoint) < DrawingEpsilon &&
-                     edge.EndPoint.DistanceTo(e.EndPoint)     < DrawingEpsilon)
-                    || (edge.StartPoint.DistanceTo(e.EndPoint) < DrawingEpsilon &&
-                        edge.EndPoint.DistanceTo(e.StartPoint) < DrawingEpsilon);
+                    (edge.StartPoint.DistanceTo(e.StartPoint) < tolerance &&
+                     edge.EndPoint.DistanceTo(e.EndPoint)     < tolerance)
+                    || (edge.StartPoint.DistanceTo(e.EndPoint) < tolerance &&
+                        edge.EndPoint.DistanceTo(e.StartPoint) < tolerance);
 
                 if (sameEndPoints)
                     return true;
@@ -288,10 +290,19 @@ namespace HideCurvedSheetMetalEdges
         private List<LinePrimitive> ProjectModelEdgeToPresentation(
             LineSegment modelEdge)
         {
-            var result = new List<LinePrimitive>(1);
-
             if (modelEdge == null)
-                return result;
+                return new List<LinePrimitive>();
+
+            if (!this.IsCurvedSectionView)
+                return ProjectStraightModelEdgeToPresentation(modelEdge);
+
+            return ProjectCurvedModelEdgeToPresentation(modelEdge);
+        }
+
+        private List<LinePrimitive> ProjectStraightModelEdgeToPresentation(
+            LineSegment modelEdge)
+        {
+            var result = new List<LinePrimitive>(1);
 
             if (!TryProjectModelPointToPresentation(modelEdge.Point1, out Point start) ||
                 !TryProjectModelPointToPresentation(modelEdge.Point2, out Point end))
@@ -302,11 +313,196 @@ namespace HideCurvedSheetMetalEdges
             if (Distance.PointToPoint(start, end) <= DrawingEpsilon)
                 return result;
 
-            result.Add(new LinePrimitive(
+            result.Add(CreateLinePrimitive(start, end));
+            return result;
+        }
+
+        private List<LinePrimitive> ProjectCurvedModelEdgeToPresentation(
+            LineSegment modelEdge)
+        {
+            double modelLength = Distance.PointToPoint(modelEdge.Point1, modelEdge.Point2);
+            if (modelLength <= ModelEpsilon * 0.5)
+                return new List<LinePrimitive>();
+
+            int segmentCount = (int)Math.Ceiling(
+                modelLength / CurvedProjectionSampleLength);
+
+            segmentCount = Math.Max(
+                CurvedProjectionMinSegmentCount,
+                Math.Min(CurvedProjectionMaxSegmentCount, segmentCount));
+
+            var result = new List<LinePrimitive>();
+            var projectedPointChain = new List<Point>(segmentCount + 1);
+
+            for (int i = 0; i <= segmentCount; i++)
+            {
+                double ratio = (double)i / segmentCount;
+                Point modelPoint = InterpolatePoint(
+                    modelEdge.Point1,
+                    modelEdge.Point2,
+                    ratio);
+
+                if (!TryProjectModelPointToPresentation(modelPoint, out Point projectedPoint))
+                {
+                    AppendProjectedPolylineSegments(projectedPointChain, result);
+                    projectedPointChain.Clear();
+                    continue;
+                }
+
+                if (projectedPointChain.Count > 0 &&
+                    Distance.PointToPoint(projectedPointChain[projectedPointChain.Count - 1], projectedPoint) <=
+                    this.ActiveDrawingEpsilon * 0.25)
+                {
+                    continue;
+                }
+
+                projectedPointChain.Add(projectedPoint);
+            }
+
+            AppendProjectedPolylineSegments(projectedPointChain, result);
+            return result;
+        }
+
+        private void AppendProjectedPolylineSegments(
+            List<Point> projectedPoints,
+            List<LinePrimitive> output)
+        {
+            if (projectedPoints == null || projectedPoints.Count < 2)
+                return;
+
+            List<Point> simplifiedPoints = SimplifyProjectedPolyline(
+                projectedPoints,
+                this.ActiveDrawingEpsilon * 0.5);
+
+            for (int i = 0; i < simplifiedPoints.Count - 1; i++)
+            {
+                Point start = simplifiedPoints[i];
+                Point end = simplifiedPoints[i + 1];
+
+                if (Distance.PointToPoint(start, end) <= this.ActiveDrawingEpsilon * 0.25)
+                    continue;
+
+                output.Add(CreateLinePrimitive(start, end));
+            }
+        }
+
+        private static Point InterpolatePoint(Point start, Point end, double ratio)
+        {
+            return new Point(
+                start.X + (end.X - start.X) * ratio,
+                start.Y + (end.Y - start.Y) * ratio,
+                start.Z + (end.Z - start.Z) * ratio);
+        }
+
+        private static LinePrimitive CreateLinePrimitive(Point start, Point end)
+        {
+            return new LinePrimitive(
                 new Vector2(start.X, start.Y),
-                new Vector2(end.X, end.Y)));
+                new Vector2(end.X, end.Y));
+        }
+
+        private static List<Point> SimplifyProjectedPolyline(
+            List<Point> points,
+            double tolerance)
+        {
+            if (points == null || points.Count <= 2)
+                return points ?? new List<Point>();
+
+            var keep = new bool[points.Count];
+            keep[0] = true;
+            keep[points.Count - 1] = true;
+
+            SimplifyProjectedPolylineRange(
+                points,
+                0,
+                points.Count - 1,
+                tolerance,
+                keep);
+
+            var result = new List<Point>();
+            for (int i = 0; i < points.Count; i++)
+            {
+                if (keep[i])
+                    result.Add(points[i]);
+            }
 
             return result;
+        }
+
+        private static void SimplifyProjectedPolylineRange(
+            List<Point> points,
+            int firstIndex,
+            int lastIndex,
+            double tolerance,
+            bool[] keep)
+        {
+            if (lastIndex <= firstIndex + 1)
+                return;
+
+            Point start = points[firstIndex];
+            Point end = points[lastIndex];
+
+            double maximumDistance = 0.0;
+            int furthestPointIndex = -1;
+
+            for (int i = firstIndex + 1; i < lastIndex; i++)
+            {
+                double distance = DistancePointToSegment2D(
+                    points[i],
+                    start,
+                    end);
+
+                if (distance <= maximumDistance)
+                    continue;
+
+                maximumDistance = distance;
+                furthestPointIndex = i;
+            }
+
+            if (furthestPointIndex < 0 || maximumDistance <= tolerance)
+                return;
+
+            keep[furthestPointIndex] = true;
+
+            SimplifyProjectedPolylineRange(
+                points,
+                firstIndex,
+                furthestPointIndex,
+                tolerance,
+                keep);
+
+            SimplifyProjectedPolylineRange(
+                points,
+                furthestPointIndex,
+                lastIndex,
+                tolerance,
+                keep);
+        }
+
+        private static double DistancePointToSegment2D(
+            Point point,
+            Point segmentStart,
+            Point segmentEnd)
+        {
+            double dx = segmentEnd.X - segmentStart.X;
+            double dy = segmentEnd.Y - segmentStart.Y;
+            double lengthSquared = dx * dx + dy * dy;
+
+            if (lengthSquared <= 1e-12)
+                return Distance.PointToPoint(point, segmentStart);
+
+            double ratio =
+                ((point.X - segmentStart.X) * dx +
+                 (point.Y - segmentStart.Y) * dy) / lengthSquared;
+
+            ratio = Math.Max(0.0, Math.Min(1.0, ratio));
+
+            var closestPoint = new Point(
+                segmentStart.X + dx * ratio,
+                segmentStart.Y + dy * ratio,
+                0.0);
+
+            return Distance.PointToPoint(point, closestPoint);
         }
 
         private bool TryProjectModelPointToPresentation(
@@ -356,7 +552,14 @@ namespace HideCurvedSheetMetalEdges
             }
             catch
             {
-                // Awaryjnie zachowujemy dotychczasową transformację płaską.
+                // Dla curved view płaska transformacja dawałaby punkt z innej geometrii
+                // i mogłaby tworzyć fałszywe odcinki pomiędzy poprawnymi próbkami.
+                if (this.IsCurvedSectionView)
+                {
+                    presentationPoint = null;
+                    return false;
+                }
+
                 try
                 {
                     Point fallback = this.TransformationMatrix.Transform(modelPoint);

@@ -25,8 +25,9 @@ namespace HideCurvedSheetMetalEdges
             }
         }
 
-        private static LineGraph BuildLineGraph(List<CachedLine> cachedLines)
+        private LineGraph BuildLineGraph(List<CachedLine> cachedLines)
         {
+            double nodeTolerance = this.ActiveDrawingEpsilon;
             var nodes = new List<Point>();
             var adjacency = new Dictionary<int, List<int>>();
 
@@ -50,7 +51,7 @@ namespace HideCurvedSheetMetalEdges
             {
                 for (int i = 0; i < nodes.Count; i++)
                 {
-                    if (Distance.PointToPoint(nodes[i], p) <= DrawingEpsilon)
+                    if (Distance.PointToPoint(nodes[i], p) <= nodeTolerance)
                         return i;
                 }
 
@@ -60,10 +61,12 @@ namespace HideCurvedSheetMetalEdges
             }
         }
 
-        private static bool IsDiagonalInGraph(LinePrimitive linePrimitive, LineGraph graph)
+        private bool IsDiagonalInGraph(LinePrimitive linePrimitive, LineGraph graph)
         {
             if (graph == null)
                 return false;
+
+            double nodeTolerance = this.ActiveDrawingEpsilon;
 
             var pStart = new Point(linePrimitive.StartPoint.X, linePrimitive.StartPoint.Y, 0);
             var pEnd   = new Point(linePrimitive.EndPoint.X,   linePrimitive.EndPoint.Y,   0);
@@ -75,10 +78,10 @@ namespace HideCurvedSheetMetalEdges
             {
                 var n = graph.Nodes[i];
 
-                if (start == -1 && Distance.PointToPoint(n, pStart) <= DrawingEpsilon)
+                if (start == -1 && Distance.PointToPoint(n, pStart) <= nodeTolerance)
                     start = i;
     
-                if (end == -1 && Distance.PointToPoint(n, pEnd) <= DrawingEpsilon)
+                if (end == -1 && Distance.PointToPoint(n, pEnd) <= nodeTolerance)
                     end = i;
 
                 if (start != -1 && end != -1)

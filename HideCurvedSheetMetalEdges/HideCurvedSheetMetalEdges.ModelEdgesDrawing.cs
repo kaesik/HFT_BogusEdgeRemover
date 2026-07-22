@@ -36,7 +36,7 @@ namespace HideCurvedSheetMetalEdges
             return modelEdgesInDrawing;
         }
 
-        private static bool LinePrimitiveCanOverlapAnyEdgeToBeDeleted(
+        private bool LinePrimitiveCanOverlapAnyEdgeToBeDeleted(
             LinePrimitive linePrimitive,
             List<ModelEdgePair> modelEdgesToBeDeleted)
         {
@@ -52,143 +52,255 @@ namespace HideCurvedSheetMetalEdges
             return false;
         }
 
-        private static bool LinePrimitiveCanOverlapModelEdge(
+        private bool LinePrimitiveCanOverlapModelEdge(
+            LinePrimitive linePrimitive,
+            LinePrimitive modelEdge)
+        {
+            return TryGetCollinearOverlap(
+                linePrimitive,
+                modelEdge,
+                out _,
+                out _,
+                out _);
+        }
+
+        private bool LinePrimitiveOverlapsWithEdgeToBeDeleted(
+            LinePrimitive linePrimitive,
+            ModelEdgePair modelEdgeToBeDeleted)
+        {
+            if (TryGetCollinearOverlap(
+                    linePrimitive,
+                    modelEdgeToBeDeleted.ModelEdgeInDrawing,
+                    out double overlapLength,
+                    out double lineLength,
+                    out double modelEdgeLength))
+            {
+                double requiredReferenceLength = this.IsCurvedSectionView
+                    ? Math.Min(lineLength, modelEdgeLength)
+                    : lineLength;
+
+                if (overlapLength >= requiredReferenceLength * 0.8)
+                    return true;
+            }
+
+            return this.IsCurvedSectionView &&
+                   LinePrimitiveApproximatelyOverlapsCurvedModelEdge(
+                       linePrimitive,
+                       modelEdgeToBeDeleted.ModelEdgeInDrawing);
+        }
+
+        private bool LinePrimitiveApproximatelyOverlapsCurvedModelEdge(
             LinePrimitive linePrimitive,
             LinePrimitive modelEdge)
         {
             if (linePrimitive == null || modelEdge == null)
                 return false;
 
-            if (!LinePrimitiveBoundingBoxesOverlap(linePrimitive, modelEdge, DrawingEpsilon))
-                return false;
+            double tolerance = Math.Max(this.ActiveDrawingEpsilon * 4.0, 0.25);
 
-            var edgeStart = new Point(modelEdge.StartPoint.X, modelEdge.StartPoint.Y);
-            var edgeEnd   = new Point(modelEdge.EndPoint.X,   modelEdge.EndPoint.Y);
-
-            Line edgeLine = new(edgeStart, edgeEnd);
-
-            var lpStart = new Point(linePrimitive.StartPoint.X, linePrimitive.StartPoint.Y);
-            var lpEnd   = new Point(linePrimitive.EndPoint.X,   linePrimitive.EndPoint.Y);
-
-            if (Distance.PointToLine(lpStart, edgeLine) > DrawingEpsilon ||
-                Distance.PointToLine(lpEnd,   edgeLine) > DrawingEpsilon)
+            if (!LinePrimitiveBoundingBoxesOverlap(
+                    linePrimitive,
+                    modelEdge,
+                    tolerance))
             {
                 return false;
             }
 
-            var edgeDir = new Vector(edgeEnd.X - edgeStart.X, edgeEnd.Y - edgeStart.Y, 0);
-            double edgeLen = edgeDir.GetLength();
-            if (edgeLen < DrawingEpsilon)
+            var lineStart = new Point(
+                linePrimitive.StartPoint.X,
+                linePrimitive.StartPoint.Y,
+                0.0);
+
+            var lineEnd = new Point(
+                linePrimitive.EndPoint.X,
+                linePrimitive.EndPoint.Y,
+                0.0);
+
+            var edgeStart = new Point(
+                modelEdge.StartPoint.X,
+                modelEdge.StartPoint.Y,
+                0.0);
+
+            var edgeEnd = new Point(
+                modelEdge.EndPoint.X,
+                modelEdge.EndPoint.Y,
+                0.0);
+
+            var lineDirection = new Vector(
+                lineEnd.X - lineStart.X,
+                lineEnd.Y - lineStart.Y,
+                0.0);
+
+            var edgeDirection = new Vector(
+                edgeEnd.X - edgeStart.X,
+                edgeEnd.Y - edgeStart.Y,
+                0.0);
+
+            double lineLength = lineDirection.GetLength();
+            double edgeLength = edgeDirection.GetLength();
+
+            if (lineLength <= tolerance || edgeLength <= tolerance)
                 return false;
 
-            edgeDir.Normalize();
+            double directionCosine = Math.Abs(
+                Vector.Dot(lineDirection, edgeDirection) /
+                (lineLength * edgeLength));
 
-            double tLp0 = Vector.Dot(new Vector(lpStart.X - edgeStart.X, lpStart.Y - edgeStart.Y, 0), edgeDir);
-            double tLp1 = Vector.Dot(new Vector(lpEnd.X   - edgeStart.X, lpEnd.Y   - edgeStart.Y, 0), edgeDir);
+            // Dopuszczamy niewielką zmianę kierunku powstałą podczas
+            // aproksymacji curved section view krótkimi segmentami.
+            if (directionCosine < Math.Cos(Math.PI / 12.0))
+                return false;
 
-            double lpMin = Math.Min(tLp0, tLp1);
-            double lpMax = Math.Max(tLp0, tLp1);
+            var closestPoints = ClosestPointsBetweenSegments2D(
+                lineStart,
+                lineEnd,
+                edgeStart,
+                edgeEnd);
 
-            double overlapMin = Math.Max(lpMin, 0.0);
-            double overlapMax = Math.Min(lpMax, edgeLen);
+            if (closestPoints == null ||
+                Distance.PointToPoint(
+                    closestPoints.Value.A,
+                    closestPoints.Value.B) > tolerance)
+            {
+                return false;
+            }
 
-            return overlapMax - overlapMin > DrawingEpsilon;
+            edgeDirection.Normalize();
+
+            double lineStartParameter = Vector.Dot(
+                new Vector(
+                    lineStart.X - edgeStart.X,
+                    lineStart.Y - edgeStart.Y,
+                    0.0),
+                edgeDirection);
+
+            double lineEndParameter = Vector.Dot(
+                new Vector(
+                    lineEnd.X - edgeStart.X,
+                    lineEnd.Y - edgeStart.Y,
+                    0.0),
+                edgeDirection);
+
+            double overlapMinimum = Math.Max(
+                Math.Min(lineStartParameter, lineEndParameter),
+                0.0);
+
+            double overlapMaximum = Math.Min(
+                Math.Max(lineStartParameter, lineEndParameter),
+                edgeLength);
+
+            double overlapLength = overlapMaximum - overlapMinimum;
+            double requiredOverlap = Math.Min(lineLength, edgeLength) * 0.5;
+
+            return overlapLength >= requiredOverlap;
         }
 
-        private static bool LinePrimitiveOverlapsWithEdgeToBeDeleted(
-            LinePrimitive linePrimitive,
-            ModelEdgePair modelEdgeToBeDeleted)
-        {
-            var edge = modelEdgeToBeDeleted.ModelEdgeInDrawing;
-
-            if (!LinePrimitiveBoundingBoxesOverlap(linePrimitive, edge, DrawingEpsilon))
-                return false;
-
-            Line edgeLine = new(
-                new Point(edge.StartPoint.X, edge.StartPoint.Y),
-                new Point(edge.EndPoint.X,   edge.EndPoint.Y));
-
-            var lpStart = new Point(linePrimitive.StartPoint.X, linePrimitive.StartPoint.Y);
-            var lpEnd   = new Point(linePrimitive.EndPoint.X,   linePrimitive.EndPoint.Y);
-
-            if (Distance.PointToLine(lpStart, edgeLine) > DrawingEpsilon ||
-                Distance.PointToLine(lpEnd,   edgeLine) > DrawingEpsilon)
-                return false;
-
-            var e0 = new Point(edge.StartPoint.X, edge.StartPoint.Y);
-            var e1 = new Point(edge.EndPoint.X,   edge.EndPoint.Y);
-
-            var edgeDir = new Vector(e1.X - e0.X, e1.Y - e0.Y, 0);
-            double edgeLen = edgeDir.GetLength();
-            if (edgeLen < DrawingEpsilon)
-                return false;
-
-            var edgeDirUnit = new Vector(edgeDir);
-            edgeDirUnit.Normalize();
-
-            double tLp0 = Vector.Dot(new Vector(lpStart.X - e0.X, lpStart.Y - e0.Y, 0), edgeDirUnit);
-            double tLp1 = Vector.Dot(new Vector(lpEnd.X   - e0.X, lpEnd.Y   - e0.Y, 0), edgeDirUnit);
-
-            double lpMin = Math.Min(tLp0, tLp1);
-            double lpMax = Math.Max(tLp0, tLp1);
-
-            double overlapMin = Math.Max(lpMin, 0.0);
-            double overlapMax = Math.Min(lpMax, edgeLen);
-
-            if (overlapMax - overlapMin <= DrawingEpsilon)
-                return false;
-
-            double overlapLen = overlapMax - overlapMin;
-            double lpLen = Distance.PointToPoint(lpStart, lpEnd);
-
-            return overlapLen >= lpLen * 0.8;
-        }
-
-        private static bool LinePrimitiveOverlapsWithModelEdge(
+        private bool LinePrimitiveOverlapsWithModelEdge(
             LinePrimitive linePrimitive,
             LinePrimitive modelEdge)
         {
-            if (!LinePrimitiveBoundingBoxesOverlap(linePrimitive, modelEdge, DrawingEpsilon))
+            if (!TryGetCollinearOverlap(
+                    linePrimitive,
+                    modelEdge,
+                    out double overlapLength,
+                    out double lineLength,
+                    out double modelEdgeLength))
+            {
+                return false;
+            }
+
+            double requiredReferenceLength = this.IsCurvedSectionView
+                ? Math.Min(lineLength, modelEdgeLength)
+                : lineLength;
+
+            return overlapLength >= requiredReferenceLength * 0.8;
+        }
+
+        private bool TryGetCollinearOverlap(
+            LinePrimitive linePrimitive,
+            LinePrimitive modelEdge,
+            out double overlapLength,
+            out double lineLength,
+            out double modelEdgeLength)
+        {
+            overlapLength = 0.0;
+            lineLength = 0.0;
+            modelEdgeLength = 0.0;
+
+            if (linePrimitive == null || modelEdge == null)
                 return false;
 
-            Line edgeLine = new(
-                new Point(modelEdge.StartPoint.X, modelEdge.StartPoint.Y),
-                new Point(modelEdge.EndPoint.X,   modelEdge.EndPoint.Y));
+            double tolerance = this.ActiveDrawingEpsilon;
 
-            var lpStart = new Point(linePrimitive.StartPoint.X, linePrimitive.StartPoint.Y);
-            var lpEnd   = new Point(linePrimitive.EndPoint.X,   linePrimitive.EndPoint.Y);
+            if (!LinePrimitiveBoundingBoxesOverlap(
+                    linePrimitive,
+                    modelEdge,
+                    tolerance))
+            {
+                return false;
+            }
 
-            if (Distance.PointToLine(lpStart, edgeLine) > DrawingEpsilon ||
-                Distance.PointToLine(lpEnd,   edgeLine) > DrawingEpsilon)
+            var edgeStart = new Point(
+                modelEdge.StartPoint.X,
+                modelEdge.StartPoint.Y);
+
+            var edgeEnd = new Point(
+                modelEdge.EndPoint.X,
+                modelEdge.EndPoint.Y);
+
+            var lineStart = new Point(
+                linePrimitive.StartPoint.X,
+                linePrimitive.StartPoint.Y);
+
+            var lineEnd = new Point(
+                linePrimitive.EndPoint.X,
+                linePrimitive.EndPoint.Y);
+
+            Line edgeLine = new(edgeStart, edgeEnd);
+
+            if (Distance.PointToLine(lineStart, edgeLine) > tolerance ||
+                Distance.PointToLine(lineEnd, edgeLine) > tolerance)
+            {
+                return false;
+            }
+
+            var edgeDirection = new Vector(
+                edgeEnd.X - edgeStart.X,
+                edgeEnd.Y - edgeStart.Y,
+                0.0);
+
+            modelEdgeLength = edgeDirection.GetLength();
+            if (modelEdgeLength <= tolerance)
                 return false;
 
-            var e0 = new Point(modelEdge.StartPoint.X, modelEdge.StartPoint.Y);
-            var e1 = new Point(modelEdge.EndPoint.X,   modelEdge.EndPoint.Y);
+            edgeDirection.Normalize();
 
-            var edgeDir = new Vector(e1.X - e0.X, e1.Y - e0.Y, 0);
-            double edgeLen = edgeDir.GetLength();
-            if (edgeLen < DrawingEpsilon)
+            double lineStartParameter = Vector.Dot(
+                new Vector(
+                    lineStart.X - edgeStart.X,
+                    lineStart.Y - edgeStart.Y,
+                    0.0),
+                edgeDirection);
+
+            double lineEndParameter = Vector.Dot(
+                new Vector(
+                    lineEnd.X - edgeStart.X,
+                    lineEnd.Y - edgeStart.Y,
+                    0.0),
+                edgeDirection);
+
+            double lineMinimum = Math.Min(lineStartParameter, lineEndParameter);
+            double lineMaximum = Math.Max(lineStartParameter, lineEndParameter);
+
+            double overlapMinimum = Math.Max(lineMinimum, 0.0);
+            double overlapMaximum = Math.Min(lineMaximum, modelEdgeLength);
+
+            overlapLength = overlapMaximum - overlapMinimum;
+            if (overlapLength <= tolerance)
                 return false;
 
-            var edgeDirUnit = new Vector(edgeDir);
-            edgeDirUnit.Normalize();
-
-            double tLp0 = Vector.Dot(new Vector(lpStart.X - e0.X, lpStart.Y - e0.Y, 0), edgeDirUnit);
-            double tLp1 = Vector.Dot(new Vector(lpEnd.X   - e0.X, lpEnd.Y   - e0.Y, 0), edgeDirUnit);
-
-            double lpMin = Math.Min(tLp0, tLp1);
-            double lpMax = Math.Max(tLp0, tLp1);
-
-            double overlapMin = Math.Max(lpMin, 0.0);
-            double overlapMax = Math.Min(lpMax, edgeLen);
-
-            if (overlapMax - overlapMin <= DrawingEpsilon)
-                return false;
-
-            double overlapLen = overlapMax - overlapMin;
-            double lpLen = Distance.PointToPoint(lpStart, lpEnd);
-
-            return overlapLen >= lpLen * 0.8;
+            lineLength = Distance.PointToPoint(lineStart, lineEnd);
+            return lineLength > tolerance;
         }
 
         #endregion

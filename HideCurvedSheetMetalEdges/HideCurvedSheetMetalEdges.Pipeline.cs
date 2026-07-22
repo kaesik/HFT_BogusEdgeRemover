@@ -268,6 +268,15 @@ namespace HideCurvedSheetMetalEdges
 
                 if (overlapsDeleteEdge)
                 {
+                    // W curved section view krawędź modelowa jest już jednoznacznym
+                    // kandydatem do usunięcia. Dodatkowa klasyfikacja konturu jest
+                    // zawodna, gdy Tekla dzieli kontur na krótkie odcinki lub łuki.
+                    if (this.IsCurvedSectionView)
+                    {
+                        removedHiddenLinesCount++;
+                        return true;
+                    }
+
                     isInternal = LinePrimitiveIsNotExternal(linePrimitive, cachedLines);
                     if (isInternal.Value)
                     {

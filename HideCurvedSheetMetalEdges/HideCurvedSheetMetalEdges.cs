@@ -28,11 +28,15 @@ namespace HideCurvedSheetMetalEdges
     {
         #region Stałe / pola
 
-        private const double ModelEpsilon        = 1.0;
-        private const double DrawingEpsilon      = 0.0001;
-        private const double Degrees90           = Math.PI / 2;
-        private const double BigAngleAllowance   = Math.PI / 16;
-        private const double SmallAngleAllowance = Math.PI / 32;
+        private const double ModelEpsilon                  = 1.0;
+        private const double DrawingEpsilon                = 0.0001;
+        private const double CurvedDrawingEpsilonMinimum   = 0.05;
+        private const double CurvedProjectionSampleLength  = 25.0;
+        private const int CurvedProjectionMinSegmentCount  = 4;
+        private const int CurvedProjectionMaxSegmentCount  = 96;
+        private const double Degrees90                     = Math.PI / 2;
+        private const double BigAngleAllowance             = Math.PI / 16;
+        private const double SmallAngleAllowance           = Math.PI / 32;
 
         private readonly TSM.Model _model = new();
 
@@ -46,6 +50,18 @@ namespace HideCurvedSheetMetalEdges
 
         private bool UseTopologyPipeline =>
             this.IsUnfolded || this.IsCurvedSectionView;
+
+        private double ActiveDrawingEpsilon
+        {
+            get
+            {
+                if (!this.IsCurvedSectionView)
+                    return DrawingEpsilon;
+
+                double scaleAdjustedTolerance = ModelEpsilon / Math.Max(this.Scale, 1.0);
+                return Math.Max(CurvedDrawingEpsilonMinimum, scaleAdjustedTolerance);
+            }
+        }
 
         #endregion
 
