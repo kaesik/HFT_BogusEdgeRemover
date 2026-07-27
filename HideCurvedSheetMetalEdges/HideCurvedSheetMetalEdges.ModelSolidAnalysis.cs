@@ -227,8 +227,6 @@ namespace HideCurvedSheetMetalEdges
                     return null;
                 case 2:
                     return new LineSegment(commonVertexes[0], commonVertexes[1]);
-                case > 6:
-                    return null;
             }
 
             Point p0 = commonVertexes[0];
@@ -290,7 +288,7 @@ namespace HideCurvedSheetMetalEdges
                 p0.Y + dir.Y * maxT,
                 p0.Z + dir.Z * maxT);
 
-            return Distance.PointToPoint(start, end) < DrawingEpsilon
+            return Distance.PointToPoint(start, end) < ModelEpsilon * 0.5
                 ? null
                 : new LineSegment(start, end);
         }

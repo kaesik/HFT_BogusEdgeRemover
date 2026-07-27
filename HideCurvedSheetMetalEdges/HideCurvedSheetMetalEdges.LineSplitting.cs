@@ -63,6 +63,140 @@ namespace HideCurvedSheetMetalEdges
             return result;
         }
 
+        private List<LinePrimitive> SplitLinePrimitiveByIntersectionsAndModelEdges(
+            LinePrimitive baseLine,
+            List<CachedLine> cachedLines,
+            List<ModelEdgePair> modelEdgesToBeDeleted)
+        {
+            List<LinePrimitive> intersectionParts =
+                SplitLinePrimitiveByIntersections(baseLine, cachedLines);
+
+            if (modelEdgesToBeDeleted == null ||
+                modelEdgesToBeDeleted.Count == 0)
+            {
+                return intersectionParts;
+            }
+
+            var result = new List<LinePrimitive>();
+
+            foreach (LinePrimitive intersectionPart in intersectionParts)
+            {
+                List<LinePrimitive> modelEdgeParts =
+                    SplitLinePrimitiveAtModelEdgeEndpoints(
+                        intersectionPart,
+                        modelEdgesToBeDeleted);
+
+                result.AddRange(modelEdgeParts);
+            }
+
+            return result;
+        }
+
+        private List<LinePrimitive> SplitLinePrimitiveAtModelEdgeEndpoints(
+            LinePrimitive baseLine,
+            List<ModelEdgePair> modelEdgesToBeDeleted)
+        {
+            double tolerance = this.GetModelEdgeMatchingTolerance();
+
+            var baseStart = new Point(
+                baseLine.StartPoint.X,
+                baseLine.StartPoint.Y,
+                0.0);
+
+            var baseEnd = new Point(
+                baseLine.EndPoint.X,
+                baseLine.EndPoint.Y,
+                0.0);
+
+            var baseSegment = new LineSegment(baseStart, baseEnd);
+            var baseGeometryLine = new Line(baseStart, baseEnd);
+            var splitPoints = new List<Point> { baseStart, baseEnd };
+
+            foreach (ModelEdgePair modelEdgePair in modelEdgesToBeDeleted)
+            {
+                LinePrimitive modelEdge = modelEdgePair.ModelEdgeInDrawing;
+                if (modelEdge == null)
+                    continue;
+
+                if (!LinePrimitiveBoundingBoxesOverlap(
+                        baseLine,
+                        modelEdge,
+                        tolerance))
+                {
+                    continue;
+                }
+
+                var modelStart = new Point(
+                    modelEdge.StartPoint.X,
+                    modelEdge.StartPoint.Y,
+                    0.0);
+
+                var modelEnd = new Point(
+                    modelEdge.EndPoint.X,
+                    modelEdge.EndPoint.Y,
+                    0.0);
+
+                // Dzielimy wyłącznie po końcach krawędzi współliniowych.
+                // Krawędzie przecinające są już obsługiwane przez standardowe
+                // SplitLinePrimitiveByIntersections().
+                if (Distance.PointToLine(modelStart, baseGeometryLine) > tolerance ||
+                    Distance.PointToLine(modelEnd, baseGeometryLine) > tolerance)
+                {
+                    continue;
+                }
+
+                AddProjectedSplitPoint(modelStart);
+                AddProjectedSplitPoint(modelEnd);
+            }
+
+            splitPoints = UniquePoints(splitPoints, tolerance);
+
+            splitPoints.Sort((a, b) =>
+                Distance.PointToPoint(baseStart, a)
+                    .CompareTo(Distance.PointToPoint(baseStart, b)));
+
+            if (splitPoints.Count <= 2)
+                return new List<LinePrimitive> { baseLine };
+
+            var result = new List<LinePrimitive>(splitPoints.Count - 1);
+
+            for (int i = 0; i < splitPoints.Count - 1; i++)
+            {
+                Point start = splitPoints[i];
+                Point end = splitPoints[i + 1];
+
+                if (Distance.PointToPoint(start, end) <= tolerance)
+                    continue;
+
+                result.Add(new LinePrimitive(
+                    new Vector2(start.X, start.Y),
+                    new Vector2(end.X, end.Y)));
+            }
+
+            return result.Count > 0
+                ? result
+                : new List<LinePrimitive> { baseLine };
+
+            void AddProjectedSplitPoint(Point modelEdgePoint)
+            {
+                Point projectedPoint = ClosestPointOnSegment2D(
+                    baseSegment.Point1,
+                    baseSegment.Point2,
+                    modelEdgePoint);
+
+                if (Distance.PointToPoint(projectedPoint, modelEdgePoint) > tolerance)
+                    return;
+
+                if (Distance.PointToPoint(projectedPoint, baseStart) <= tolerance ||
+                    Distance.PointToPoint(projectedPoint, baseEnd) <= tolerance)
+                {
+                    return;
+                }
+
+                splitPoints.Add(projectedPoint);
+            }
+        }
+
         private static List<LineSegment> SplitLineByIntersections(
             LineSegment baseSeg,
             List<LineSegment> cutters)

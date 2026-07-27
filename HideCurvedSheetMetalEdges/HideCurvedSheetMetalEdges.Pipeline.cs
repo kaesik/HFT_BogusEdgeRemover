@@ -99,7 +99,11 @@ namespace HideCurvedSheetMetalEdges
                             break;
                         }
 
-                        var splitLines = SplitLinePrimitiveByIntersections(linePrimitive, cachedLinesNonUnfolded);
+                        var splitLines =
+                            SplitLinePrimitiveByIntersectionsAndModelEdges(
+                                linePrimitive,
+                                cachedLinesNonUnfolded,
+                                modelEdgesToBeDeleted);
 
                         foreach (var splitLine in splitLines)
                         {
@@ -183,7 +187,11 @@ namespace HideCurvedSheetMetalEdges
                                 break;
                             }
 
-                            var splitLines = SplitLinePrimitiveByIntersections(linePrimitive, cachedLines);
+                            var splitLines =
+                                SplitLinePrimitiveByIntersectionsAndModelEdges(
+                                    linePrimitive,
+                                    cachedLines,
+                                    modelEdgesToBeDeleted);
 
                             foreach (var splitLine in splitLines)
                             {
@@ -308,12 +316,18 @@ namespace HideCurvedSheetMetalEdges
 
             foreach (var modelEdge in modelEdgesToBeDeleted)
             {
-                if (!LinePrimitiveOverlapsWithEdgeToBeDeleted(linePrimitive, modelEdge))
+                if (!LinePrimitiveOverlapsWithEdgeToBeDeleted(
+                        linePrimitive,
+                        modelEdge))
+                {
                     continue;
+                }
 
-                if (!LinePrimitiveIsNotExternal(linePrimitive, cachedLines))
-                    return false;
-
+                // W zwykłym widoku kandydat został już zweryfikowany na poziomie
+                // bryły: jest wspólną krawędzią dwóch podobnie skierowanych ścian,
+                // znajdujących się po tej samej stronie kierunku patrzenia.
+                // Nie jest więc krawędzią sylwetki. Dodatkowa klasyfikacja konturu
+                // powodowała pozostawianie poprawnie dopasowanych linii.
                 removedHiddenLinesCount++;
                 return true;
             }

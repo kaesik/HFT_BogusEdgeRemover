@@ -56,12 +56,23 @@ namespace HideCurvedSheetMetalEdges
             LinePrimitive linePrimitive,
             LinePrimitive modelEdge)
         {
-            return TryGetCollinearOverlap(
+            if (TryGetCollinearOverlap(
+                    linePrimitive,
+                    modelEdge,
+                    out _,
+                    out _,
+                    out _))
+            {
+                return true;
+            }
+
+            // Wstępny filtr nie może być bardziej restrykcyjny niż właściwe
+            // dopasowanie. Tekla potrafi zwrócić linię minimalnie przesuniętą
+            // lub obróconą względem projekcji krawędzi modelowej.
+            return LinePrimitiveApproximatelyOverlapsModelEdge(
                 linePrimitive,
                 modelEdge,
-                out _,
-                out _,
-                out _);
+                true);
         }
 
         private bool LinePrimitiveOverlapsWithEdgeToBeDeleted(
@@ -83,20 +94,21 @@ namespace HideCurvedSheetMetalEdges
                     return true;
             }
 
-            return this.IsCurvedSectionView &&
-                   LinePrimitiveApproximatelyOverlapsCurvedModelEdge(
-                       linePrimitive,
-                       modelEdgeToBeDeleted.ModelEdgeInDrawing);
+            return LinePrimitiveApproximatelyOverlapsModelEdge(
+                linePrimitive,
+                modelEdgeToBeDeleted.ModelEdgeInDrawing,
+                false);
         }
 
-        private bool LinePrimitiveApproximatelyOverlapsCurvedModelEdge(
+        private bool LinePrimitiveApproximatelyOverlapsModelEdge(
             LinePrimitive linePrimitive,
-            LinePrimitive modelEdge)
+            LinePrimitive modelEdge,
+            bool candidateOnly)
         {
             if (linePrimitive == null || modelEdge == null)
                 return false;
 
-            double tolerance = Math.Max(this.ActiveDrawingEpsilon * 4.0, 0.25);
+            double tolerance = GetModelEdgeMatchingTolerance();
 
             if (!LinePrimitiveBoundingBoxesOverlap(
                     linePrimitive,
@@ -146,9 +158,11 @@ namespace HideCurvedSheetMetalEdges
                 Vector.Dot(lineDirection, edgeDirection) /
                 (lineLength * edgeLength));
 
-            // Dopuszczamy niewielką zmianę kierunku powstałą podczas
-            // aproksymacji curved section view krótkimi segmentami.
-            if (directionCosine < Math.Cos(Math.PI / 12.0))
+            double maximumAngle = this.IsCurvedSectionView
+                ? Math.PI / 12.0
+                : Math.PI / 60.0;
+
+            if (directionCosine < Math.Cos(maximumAngle))
                 return false;
 
             var closestPoints = ClosestPointsBetweenSegments2D(
@@ -190,9 +204,32 @@ namespace HideCurvedSheetMetalEdges
                 edgeLength);
 
             double overlapLength = overlapMaximum - overlapMinimum;
-            double requiredOverlap = Math.Min(lineLength, edgeLength) * 0.5;
+            if (overlapLength <= tolerance)
+                return false;
+
+            double requiredRatio;
+
+            if (candidateOnly)
+                requiredRatio = 0.15;
+            else
+                requiredRatio = this.IsCurvedSectionView ? 0.5 : 0.65;
+
+            double requiredOverlap =
+                Math.Min(lineLength, edgeLength) * requiredRatio;
 
             return overlapLength >= requiredOverlap;
+        }
+
+        private double GetModelEdgeMatchingTolerance()
+        {
+            if (this.IsCurvedSectionView)
+                return Math.Max(this.ActiveDrawingEpsilon * 4.0, 0.25);
+
+            // Dla zwykłego widoku tolerancja pozostaje mała, ale uwzględnia
+            // zaokrąglenia współrzędnych prymitywów generowanych przez Teklę.
+            return Math.Min(
+                Math.Max(this.ActiveDrawingEpsilon * 3.0, 0.03),
+                0.15);
         }
 
         private bool LinePrimitiveOverlapsWithModelEdge(
